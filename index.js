@@ -9,24 +9,21 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// ─── Память диалогов ────────────────────────────────────────────────────────
-// Хранится в памяти сервера. При рестарте Render сбрасывается — для MVP окей.
-// Структура: { [senderId]: { messages: [], humanMode: false, collected: {} } }
+// ─── Память диалогов ─────────────────────────────────────────────────────────
 const conversations = {};
 
 function getConversation(senderId) {
   if (!conversations[senderId]) {
     conversations[senderId] = {
-      messages: [],      // история для Claude
-      humanMode: false,  // true = бот молчит, директор общается сам
-      collected: {}      // собранные данные: name, phone, service, time
+      messages: [],
+      humanMode: false,
+      collected: {}
     };
   }
   return conversations[senderId];
 }
 
-// ─── Системный промпт барбершопа ─────────────────────────────────────────────
-// Замени данные ниже на реальные данные своего клиента
+// ─── Системный промпт ─────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Ты — вежливый и дружелюбный AI-ассистент барбершопа "Gentlemen's Cut" в Варшаве.
 Отвечай коротко, по-человечески, без лишней воды. Пиши на том языке, на котором написал клиент.
 
@@ -49,12 +46,13 @@ const SYSTEM_PROMPT = `Ты — вежливый и дружелюбный AI-а
 
 ПРАВИЛА ПОВЕДЕНИЯ:
 1. Если клиент хочет записаться — собери последовательно: имя, услугу, удобного мастера (или "любого"), дату и время, номер телефона.
-2. Когда собрал все данные для записи — скажи клиенту "Отлично, передаю вашу заявку!" и добавь в конце сообщения специальный тег: [ЗАЯВКА_ГОТОВА]
-3. Если клиент пишет "хочу поговорить с человеком", "свяжите меня с администратором", "хочу с менеджером" или подобное — ответь вежливо что передаёшь и добавь тег: [НУЖЕН_ЧЕЛОВЕК]
+2. Когда собрал ВСЕ данные для записи (имя + услуга + мастер + дата/время + телефон) — скажи клиенту "Отлично, передаю вашу заявку!" и в самом конце сообщения обязательно добавь точно этот тег: [ЗАЯВКА_ГОТОВА]
+3. Если клиент пишет "хочу поговорить с человеком", "свяжите меня с администратором", "хочу с менеджером" или подобное — ответь вежливо что передаёшь и в конце добавь точно этот тег: [НУЖЕН_ЧЕЛОВЕК]
 4. Никогда не придумывай данные которых нет выше. Если не знаешь — скажи "уточню у администратора".
-5. Не отвечай на вопросы не связанные с барбершопом.`;
+5. Не отвечай на вопросы не связанные с барбершопом.
+6. ВАЖНО: теги [ЗАЯВКА_ГОТОВА] и [НУЖЕН_ЧЕЛОВЕК] пиши точно так, в квадратных скобках, на русском.`;
 
-// ─── Роутер webhook ──────────────────────────────────────────────────────────
+// ─── Webhook роутер ───────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.send("FastReply Instagram webhook is running");
 });
@@ -63,6 +61,7 @@ app.get("/api/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
+
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
     console.log("Webhook verified");
     return res.status(200).send(challenge);
@@ -94,65 +93,64 @@ app.post("/api/webhook", async (req, res) => {
   }
 });
 
-// ─── Главная логика ──────────────────────────────────────────────────────────
+// ─── Главная логика ───────────────────────────────────────────────────────────
 async function handleMessage(senderId, text) {
   const conv = getConversation(senderId);
 
-  // Если директор уже подключился — бот молчит
   if (conv.humanMode) {
     console.log(`[humanMode] Молчим для ${senderId}: "${text}"`);
-    // Можно уведомить директора о новом сообщении клиента
-    await notifyDirector(
-      `💬 Клиент (${senderId}) продолжает:\n"${text}"`,
-      senderId,
-      conv
-    );
+    await notifyDirector(`💬 Клиент пишет:\n"${text}"`, senderId, conv);
     return;
   }
 
-  // Добавляем сообщение клиента в историю
   conv.messages.push({ role: "user", content: text });
 
-  // Ограничиваем историю последними 20 сообщениями (экономия токенов)
   if (conv.messages.length > 20) {
     conv.messages = conv.messages.slice(-20);
   }
 
-  // Запрос к Claude
+  console.log(`>>> Отправляем запрос к Claude для ${senderId}...`);
   const aiReply = await askClaude(conv.messages);
 
   if (!aiReply) {
+    console.error(">>> Claude вернул пустой ответ!");
     await sendInstagramMessage(senderId, "Извините, произошла ошибка. Попробуйте чуть позже.");
     return;
   }
 
-  // Добавляем ответ ассистента в историю
   conv.messages.push({ role: "assistant", content: aiReply });
 
-  // Проверяем теги в ответе
+  console.log("=== Claude reply ===");
+  console.log(aiReply);
+  console.log("===================");
+
   if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
+    console.log(">>> Тег ЗАЯВКА_ГОТОВА найден! Отправляем уведомление в Telegram...");
     const cleanReply = aiReply.replace("[ЗАЯВКА_ГОТОВА]", "").trim();
     await sendInstagramMessage(senderId, cleanReply);
     await notifyDirector("📅 Новая заявка на запись!", senderId, conv);
+    console.log(">>> Готово!");
     return;
   }
 
   if (aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
+    console.log(">>> Тег НУЖЕН_ЧЕЛОВЕК найден! Переключаем на человека...");
     const cleanReply = aiReply.replace("[НУЖЕН_ЧЕЛОВЕК]", "").trim();
     conv.humanMode = true;
     await sendInstagramMessage(senderId, cleanReply);
     await notifyDirector("🙋 Клиент хочет поговорить с человеком!", senderId, conv);
+    console.log(">>> Готово!");
     return;
   }
 
-  // Обычный ответ
+  console.log(">>> Обычный ответ, тегов не найдено");
   await sendInstagramMessage(senderId, aiReply);
 }
 
-// ─── Claude API ──────────────────────────────────────────────────────────────
+// ─── Claude API ───────────────────────────────────────────────────────────────
 async function askClaude(messages) {
   if (!ANTHROPIC_API_KEY) {
-    console.error("ANTHROPIC_API_KEY is missing");
+    console.error("ANTHROPIC_API_KEY отсутствует!");
     return null;
   }
 
@@ -165,7 +163,7 @@ async function askClaude(messages) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001", // быстрый и дешёвый для чата
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 500,
         system: SYSTEM_PROMPT,
         messages
@@ -175,7 +173,7 @@ async function askClaude(messages) {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Claude API error:", data);
+      console.error("Claude API error:", JSON.stringify(data));
       return null;
     }
 
@@ -186,41 +184,55 @@ async function askClaude(messages) {
   }
 }
 
-// ─── Уведомление директора в Telegram ───────────────────────────────────────
+// ─── Telegram уведомление ─────────────────────────────────────────────────────
 async function notifyDirector(title, senderId, conv) {
+  console.log(`>>> notifyDirector вызван: ${title}`);
+  console.log(`>>> TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? "есть" : "ОТСУТСТВУЕТ"}`);
+  console.log(`>>> TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID ? TELEGRAM_CHAT_ID : "ОТСУТСТВУЕТ"}`);
+
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.log("Telegram не настроен, пропускаем уведомление");
+    console.log(">>> Telegram не настроен, пропускаем");
     return;
   }
 
-  // Собираем последние 10 сообщений диалога
   const history = conv.messages
     .slice(-10)
     .map(m => `${m.role === "user" ? "👤 Клиент" : "🤖 Бот"}: ${m.content}`)
-    .join("\n");
+    .join("\n\n");
 
   const message = `${title}\n\nID клиента: ${senderId}\n\n📝 История диалога:\n${history}`;
 
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: message,
-        parse_mode: "HTML"
-      })
-    });
-    console.log("Telegram уведомление отправлено");
+    console.log(`>>> Отправляем в Telegram chat_id: ${TELEGRAM_CHAT_ID}`);
+    const tgResponse = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: message
+        })
+      }
+    );
+
+    const tgData = await tgResponse.json();
+    console.log(">>> Telegram ответ:", JSON.stringify(tgData));
+
+    if (!tgResponse.ok) {
+      console.error(">>> Telegram ошибка:", tgData);
+    } else {
+      console.log(">>> Telegram уведомление успешно отправлено!");
+    }
   } catch (err) {
-    console.error("Telegram error:", err);
+    console.error(">>> Telegram fetch error:", err);
   }
 }
 
-// ─── Instagram API ───────────────────────────────────────────────────────────
+// ─── Instagram API ────────────────────────────────────────────────────────────
 async function sendInstagramMessage(recipientId, text) {
   if (!INSTAGRAM_ACCESS_TOKEN) {
-    console.error("INSTAGRAM_ACCESS_TOKEN is missing");
+    console.error("INSTAGRAM_ACCESS_TOKEN отсутствует!");
     return;
   }
 
@@ -237,15 +249,19 @@ async function sendInstagramMessage(recipientId, text) {
   });
 
   const data = await response.json();
-  console.log("Instagram send response:", data);
+  console.log("Instagram send response:", JSON.stringify(data));
 
   if (!response.ok) {
     console.error("Failed to send Instagram message:", data);
   }
 }
 
-// ─── Запуск ──────────────────────────────────────────────────────────────────
+// ─── Запуск ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`FastReply server running on port ${PORT}`);
+  console.log(`ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY ? "✓ есть" : "✗ отсутствует"}`);
+  console.log(`INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN ? "✓ есть" : "✗ отсутствует"}`);
+  console.log(`TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? "✓ есть" : "✗ отсутствует"}`);
+  console.log(`TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID ? "✓ " + TELEGRAM_CHAT_ID : "✗ отсутствует"}`);
 });
