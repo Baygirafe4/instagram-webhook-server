@@ -143,7 +143,7 @@ app.get("/auth/callback", async (req, res) => {
 
     // Получаем long-lived token
     const longTokenRes = await fetch(
-  `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=ig_exchange_token&client_id=${IG_APP_ID}&client_secret=${IG_APP_SECRET}&access_token=${shortToken}`
+  `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${IG_APP_SECRET}&access_token=${shortToken}`
 );
     const longTokenData = await longTokenRes.json();
     console.log("Long token response:", JSON.stringify(longTokenData));
@@ -151,7 +151,7 @@ app.get("/auth/callback", async (req, res) => {
 
     // Получаем профиль
     const profileRes = await fetch(
-  `https://graph.facebook.com/v21.0/me?fields=id,username,name&access_token=${accessToken}`
+  `https://graph.instagram.com/v21.0/me?fields=id,username,name&access_token=${shortToken}`
 );
     const profile = await profileRes.json();
     console.log("Profile:", JSON.stringify(profile));
