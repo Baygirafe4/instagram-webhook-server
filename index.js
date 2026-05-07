@@ -142,19 +142,15 @@ app.get("/auth/callback", async (req, res) => {
     const igUserId = String(tokenData.user_id);
 
     // Получаем long-lived token
-    const longTokenRes = await fetch(
-  `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${IG_APP_SECRET}&access_token=${shortToken}`,
-  { method: "GET", headers: { "Content-Type": "application/json" } }
-);
+    // Пропускаем long token - используем short token
+const accessToken = shortToken;
 
-const longTokenData = await longTokenRes.json();
-console.log("Long token response:", JSON.stringify(longTokenData));
-const accessToken = longTokenData.access_token || shortToken;
-
-// Получаем профиль
-const profileRes = await fetch(
-  `https://graph.instagram.com/v21.0/${igUserId}?fields=id,username,name&access_token=${accessToken}`
-);
+// Профиль берём из tokenData (user_id уже есть)
+const profile = {
+  id: igUserId,
+  username: null,
+  name: "Бизнес " + igUserId
+};
     const profile = await profileRes.json();
     console.log("Profile:", JSON.stringify(profile));
 
