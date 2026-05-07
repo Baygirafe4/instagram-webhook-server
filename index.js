@@ -151,7 +151,7 @@ const profile = {
   username: null,
   name: "Бизнес " + igUserId
 };
-    const profile = await profileRes.json();
+    
     console.log("Profile:", JSON.stringify(profile));
 
     // Сохраняем бизнес
