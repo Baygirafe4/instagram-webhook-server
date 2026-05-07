@@ -10,17 +10,19 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Конфиг ──────────────────────────────────────────────────────────────────
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || "fastreply_secret";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const APP_ID = process.env.META_APP_ID;
-const APP_SECRET = process.env.META_APP_SECRET;
-const BASE_URL = process.env.BASE_URL || "https://instagram-webhook-server-ae6c.onrender.com";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-// ─── База бизнесов (JSON файл) ────────────────────────────────────────────────
+// Instagram OAuth данные (AL-IG)
+const IG_APP_ID = "1598302307924157";
+const IG_APP_SECRET = "d58db85080922d0bab48";
+const REDIRECT_URI = "https://instagram-webhook-server-ae6c.onrender.com/auth/callback";
+
+// ─── База бизнесов ────────────────────────────────────────────────────────────
 const DB_PATH = path.join(__dirname, "businesses.json");
 
 function loadBusinesses() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify({}));
-  }
+  if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify({}));
   return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
 }
 
@@ -31,21 +33,20 @@ function saveBusiness(igId, data) {
 }
 
 function getBusinessByIgId(igId) {
-  const businesses = loadBusinesses();
-  return businesses[igId] || null;
+  return loadBusinesses()[igId] || null;
 }
 
 // ─── Память диалогов ──────────────────────────────────────────────────────────
 const conversations = {};
 
-function getConversation(senderId) {
-  if (!conversations[senderId]) {
-    conversations[senderId] = { messages: [], humanMode: false };
+function getConversation(key) {
+  if (!conversations[key]) {
+    conversations[key] = { messages: [], humanMode: false };
   }
-  return conversations[senderId];
+  return conversations[key];
 }
 
-// ─── Системный промпт (шаблон) ────────────────────────────────────────────────
+// ─── Системный промпт ─────────────────────────────────────────────────────────
 function buildSystemPrompt(business) {
   return `Ты — вежливый AI-ассистент бизнеса "${business.name}".
 Отвечай коротко, по-человечески. Пиши на языке клиента.
@@ -54,16 +55,16 @@ function buildSystemPrompt(business) {
 ${business.description}
 
 ПРАВИЛА:
-1. Если клиент хочет записаться — собери: имя, услугу, дату/время, телефон.
-2. Когда собрал ВСЕ данные — напиши красивое резюме заявки клиенту и в конце на новой строке добавь: [ЗАЯВКА_ГОТОВА]
+1. Если клиент хочет записаться — собери последовательно: имя, услугу, дату/время, телефон.
+2. Когда собрал ВСЕ данные — напиши красивое резюме заявки и в конце добавь: [ЗАЯВКА_ГОТОВА]
 3. Если клиент пишет "хочу с человеком" или "администратор" — ответь что передаёшь и добавь: [НУЖЕН_ЧЕЛОВЕК]
 4. Не придумывай данные которых нет выше.
 5. Не отвечай на вопросы не связанные с бизнесом.`;
 }
 
-// ─── Страница подключения ─────────────────────────────────────────────────────
+// ─── OAuth страница подключения ───────────────────────────────────────────────
 app.get("/connect", (req, res) => {
-  const html = `<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -71,16 +72,14 @@ app.get("/connect", (req, res) => {
   <title>FastReply — Подключить Instagram</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    body { font-family: -apple-system, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
     .card { background: white; border-radius: 20px; padding: 48px 40px; max-width: 480px; width: 90%; text-align: center; box-shadow: 0 4px 40px rgba(0,0,0,0.08); }
     .logo { font-size: 32px; font-weight: 800; color: #111; margin-bottom: 8px; }
     .logo span { color: #6C47FF; }
     .subtitle { color: #888; font-size: 15px; margin-bottom: 40px; }
     .features { text-align: left; margin-bottom: 36px; }
     .feature { display: flex; align-items: center; gap: 12px; padding: 10px 0; color: #333; font-size: 15px; }
-    .feature-icon { font-size: 20px; }
-    .btn { display: block; background: linear-gradient(135deg, #6C47FF, #9B59FF); color: white; text-decoration: none; padding: 16px 32px; border-radius: 12px; font-size: 16px; font-weight: 600; transition: opacity 0.2s; }
-    .btn:hover { opacity: 0.9; }
+    .btn { display: block; background: linear-gradient(135deg, #6C47FF, #9B59FF); color: white; text-decoration: none; padding: 16px 32px; border-radius: 12px; font-size: 16px; font-weight: 600; }
     .safe { color: #aaa; font-size: 13px; margin-top: 16px; }
   </style>
 </head>
@@ -89,31 +88,25 @@ app.get("/connect", (req, res) => {
     <div class="logo">Fast<span>Reply</span></div>
     <div class="subtitle">AI-ассистент для вашего Instagram</div>
     <div class="features">
-      <div class="feature"><span class="feature-icon">🤖</span> AI отвечает клиентам 24/7</div>
-      <div class="feature"><span class="feature-icon">📋</span> Собирает заявки автоматически</div>
-      <div class="feature"><span class="feature-icon">📱</span> Уведомления в Telegram</div>
-      <div class="feature"><span class="feature-icon">🔒</span> Без доступа к паролю</div>
+      <div class="feature">🤖 AI отвечает клиентам 24/7</div>
+      <div class="feature">📋 Собирает заявки автоматически</div>
+      <div class="feature">📱 Уведомления в Telegram</div>
+      <div class="feature">🔒 Без доступа к паролю</div>
     </div>
     <a href="/auth/instagram" class="btn">Подключить Instagram →</a>
     <div class="safe">🔐 Безопасно через официальный Meta API</div>
   </div>
 </body>
-</html>`;
-  res.send(html);
+</html>`);
 });
 
-// ─── OAuth: начало авторизации ────────────────────────────────────────────────
+// ─── OAuth: начало ────────────────────────────────────────────────────────────
 app.get("/auth/instagram", (req, res) => {
-  const scopes = [
-    "instagram_business_basic",
-    "instagram_business_manage_messages"
-  ].join(",");
-
-  const authUrl = `https://api.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=0&client_id=${APP_ID}&redirect_uri=${BASE_URL}/auth/callback&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages`;
+  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${IG_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages`;
   res.redirect(authUrl);
 });
 
-// ─── OAuth: callback после авторизации ───────────────────────────────────────
+// ─── OAuth: callback ──────────────────────────────────────────────────────────
 app.get("/auth/callback", async (req, res) => {
   const { code, error } = req.query;
 
@@ -121,71 +114,71 @@ app.get("/auth/callback", async (req, res) => {
     return res.send(`<h2>❌ Ошибка авторизации</h2><p>${error || "Нет кода"}</p><a href="/connect">Попробовать снова</a>`);
   }
 
+  // Убираем #_ в конце кода
+  const cleanCode = code.split("#")[0];
+
   try {
     // Меняем code на access token
-  const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
-  method: "POST",
-  headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  body: new URLSearchParams({
-    client_id: "1598302307924157",
-    client_secret: "d58db85080922d0bab48",
-    grant_type: "authorization_code",
-    redirect_uri: "https://instagram-webhook-server-ae6c.onrender.com/auth/callback",
-    code: code.replace("#_", "")
-  })
-});
+    const params = new URLSearchParams();
+    params.append("client_id", IG_APP_ID);
+    params.append("client_secret", IG_APP_SECRET);
+    params.append("grant_type", "authorization_code");
+    params.append("redirect_uri", REDIRECT_URI);
+    params.append("code", cleanCode);
+
+    const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
+      method: "POST",
+      body: params
+    });
 
     const tokenData = await tokenRes.json();
-    console.log("Token response:", tokenData);
+    console.log("Token response:", JSON.stringify(tokenData));
 
     if (!tokenData.access_token) {
       return res.send(`<h2>❌ Ошибка получения токена</h2><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
     }
 
     const shortToken = tokenData.access_token;
-    const igUserId = tokenData.user_id;
+    const igUserId = String(tokenData.user_id);
 
-    // Получаем long-lived token (60 дней)
+    // Получаем long-lived token
     const longTokenRes = await fetch(
-      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${APP_SECRET}&access_token=${shortToken}`
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${IG_APP_SECRET}&access_token=${shortToken}`
     );
     const longTokenData = await longTokenRes.json();
+    console.log("Long token response:", JSON.stringify(longTokenData));
     const accessToken = longTokenData.access_token || shortToken;
 
-    // Получаем инфо об аккаунте
+    // Получаем профиль
     const profileRes = await fetch(
-      `https://graph.instagram.com/v21.0/${igUserId}?fields=username,name&access_token=${accessToken}`
+      `https://graph.instagram.com/v21.0/me?fields=username,name&access_token=${accessToken}`
     );
     const profile = await profileRes.json();
-    console.log("Profile:", profile);
+    console.log("Profile:", JSON.stringify(profile));
 
     // Сохраняем бизнес
-    saveBusiness(String(igUserId), {
-      igId: String(igUserId),
+    saveBusiness(igUserId, {
+      igId: igUserId,
       username: profile.username || "unknown",
       name: profile.name || profile.username || "Бизнес",
       accessToken,
       telegramChatId: null,
-      description: `Название: ${profile.name || profile.username}\n(Добавьте описание, цены и услуги через поддержку)`,
+      description: `Название: ${profile.name || profile.username}\n(Опишите ваш бизнес, цены и услуги)`,
       connectedAt: new Date().toISOString()
     });
 
     console.log(`✅ Новый бизнес подключён: @${profile.username} (ID: ${igUserId})`);
 
-    // Страница успеха
     res.send(`<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FastReply — Подключено!</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
     .card { background: white; border-radius: 20px; padding: 48px 40px; max-width: 480px; width: 90%; text-align: center; box-shadow: 0 4px 40px rgba(0,0,0,0.08); }
     .icon { font-size: 64px; margin-bottom: 16px; }
     h2 { font-size: 24px; margin-bottom: 8px; }
-    p { color: #666; margin-bottom: 8px; }
     .username { font-weight: 700; color: #6C47FF; }
   </style>
 </head>
@@ -194,7 +187,7 @@ app.get("/auth/callback", async (req, res) => {
     <div class="icon">🎉</div>
     <h2>Instagram подключён!</h2>
     <p>Аккаунт <span class="username">@${profile.username}</span> успешно подключён к FastReply.</p>
-    <p style="margin-top:16px; color:#aaa; font-size:14px;">Мы настроим бота под ваш бизнес и свяжемся с вами в течение 24 часов.</p>
+    <p style="margin-top:16px; color:#aaa; font-size:14px;">Мы свяжемся с вами в течение 24 часов для настройки бота.</p>
   </div>
 </body>
 </html>`);
@@ -225,23 +218,18 @@ app.post("/api/webhook", async (req, res) => {
   try {
     if (req.body.object === "instagram") {
       for (const entry of req.body.entry || []) {
-        const recipientId = entry.id; // Instagram ID бизнеса
-
+        const recipientId = entry.id;
         for (const event of entry.messaging || []) {
           const senderId = event.sender?.id;
           const messageText = event.message?.text;
-
           if (!senderId || !messageText) continue;
           if (event.message?.is_echo) continue;
 
-          // Находим бизнес по ID получателя
           const business = getBusinessByIgId(recipientId) || getBusinessByIgId(senderId);
-
           if (!business) {
             console.log(`Бизнес не найден для ID: ${recipientId}`);
             continue;
           }
-
           await handleMessage(senderId, messageText, business);
         }
       }
@@ -273,11 +261,9 @@ async function handleMessage(senderId, text, business) {
   }
 
   conv.messages.push({ role: "assistant", content: aiReply });
-
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
   if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
-    console.log(">>> Тег ЗАЯВКА_ГОТОВА найден!");
     const cleanReply = aiReply.replace("[ЗАЯВКА_ГОТОВА]", "").trim();
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
     await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
@@ -285,7 +271,6 @@ async function handleMessage(senderId, text, business) {
   }
 
   if (aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
-    console.log(">>> Тег НУЖЕН_ЧЕЛОВЕК найден!");
     const cleanReply = aiReply.replace("[НУЖЕН_ЧЕЛОВЕК]", "").trim();
     conv.humanMode = true;
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
@@ -299,7 +284,6 @@ async function handleMessage(senderId, text, business) {
 // ─── Claude API ───────────────────────────────────────────────────────────────
 async function askClaude(messages, business) {
   if (!ANTHROPIC_API_KEY) return null;
-
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -315,32 +299,26 @@ async function askClaude(messages, business) {
         messages
       })
     });
-
     const data = await response.json();
     if (!response.ok) { console.error("Claude error:", data); return null; }
     return data.content?.[0]?.text || null;
   } catch (err) {
-    console.error("Claude fetch error:", err);
+    console.error("Claude error:", err);
     return null;
   }
 }
 
 // ─── Telegram ─────────────────────────────────────────────────────────────────
 async function notifyDirector(title, senderId, conv, business) {
-  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = business.telegramChatId || process.env.TELEGRAM_CHAT_ID;
-
-  if (!TELEGRAM_BOT_TOKEN || !chatId) {
-    console.log("Telegram не настроен для бизнеса:", business.name);
-    return;
-  }
+  const chatId = business.telegramChatId || TELEGRAM_CHAT_ID;
+  if (!TELEGRAM_BOT_TOKEN || !chatId) return;
 
   const history = conv.messages
     .slice(-10)
     .map(m => `${m.role === "user" ? "👤 Клиент" : "🤖 Бот"}: ${m.content}`)
     .join("\n\n");
 
-  const message = `${title}\n\n🏢 Бизнес: ${business.name}\nID клиента: ${senderId}\n\n📝 История:\n${history}`;
+  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}`;
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -349,7 +327,7 @@ async function notifyDirector(title, senderId, conv, business) {
       body: JSON.stringify({ chat_id: chatId, text: message })
     });
     const data = await res.json();
-    console.log("Telegram:", data.ok ? "✅ отправлено" : "❌ " + data.description);
+    console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
   } catch (err) {
     console.error("Telegram error:", err);
   }
@@ -357,17 +335,15 @@ async function notifyDirector(title, senderId, conv, business) {
 
 // ─── Instagram API ────────────────────────────────────────────────────────────
 async function sendInstagramMessage(recipientId, text, accessToken) {
-  if (!accessToken) { console.error("Нет access token!"); return; }
-
+  if (!accessToken) return;
   const response = await fetch("https://graph.instagram.com/v21.0/me/messages", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ recipient: { id: recipientId }, message: { text } })
   });
-
   const data = await response.json();
   if (!response.ok) console.error("Instagram error:", data);
-  else console.log("Instagram: ✅ сообщение отправлено");
+  else console.log("Instagram: ✅ отправлено");
 }
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
@@ -375,8 +351,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`FastReply server running on port ${PORT}`);
   console.log(`ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY ? "✓" : "✗"}`);
-  console.log(`META_APP_ID: ${APP_ID ? "✓" : "✗"}`);
-  console.log(`META_APP_SECRET: ${APP_SECRET ? "✓" : "✗"}`);
+  console.log(`TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? "✓" : "✗"}`);
   const businesses = loadBusinesses();
   console.log(`Подключено бизнесов: ${Object.keys(businesses).length}`);
 });
