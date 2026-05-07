@@ -12,21 +12,6 @@ const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || "fastreply_secret";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-// Предзагрузка artoneli.pl
-if (process.env.ARTONELI_TOKEN) {
-  const businesses = loadBusinesses();
-  if (!businesses["17841476102212879"]) {
-    saveBusiness("17841476102212879", {
-      igId: "17841476102212879",
-      username: "artoneli.pl",
-      name: "Artoneli",
-      accessToken: process.env.ARTONELI_TOKEN,
-      telegramChatId: null,
-      description: "Название: Artoneli\n(Опишите ваш бизнес, цены и услуги)",
-      connectedAt: new Date().toISOString()
-    });
-  }
-}
 
 // Instagram OAuth данные (AL-IG)
 const IG_APP_ID = "1598302307924157";
@@ -45,6 +30,22 @@ function saveBusiness(igId, data) {
   const businesses = loadBusinesses();
   businesses[igId] = data;
   fs.writeFileSync(DB_PATH, JSON.stringify(businesses, null, 2));
+}
+
+// Предзагрузка artoneli.pl
+if (process.env.ARTONELI_TOKEN) {
+  const businesses = loadBusinesses();
+  if (!businesses["17841476102212879"]) {
+    saveBusiness("17841476102212879", {
+      igId: "17841476102212879",
+      username: "artoneli.pl",
+      name: "Artoneli",
+      accessToken: process.env.ARTONELI_TOKEN,
+      telegramChatId: null,
+      description: "Название: Artoneli\n(Опишите ваш бизнес, цены и услуги)",
+      connectedAt: new Date().toISOString()
+    });
+  }
 }
 
 function getBusinessByIgId(igId) {
