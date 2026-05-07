@@ -109,7 +109,7 @@ app.get("/auth/instagram", (req, res) => {
     "instagram_business_manage_messages"
   ].join(",");
 
-  const authUrl = `https://www.facebook.com/dialog/oauth?client_id=${APP_ID}&redirect_uri=${BASE_URL}/auth/callback&scope=instagram_basic,instagram_manage_messages,pages_show_list&response_type=code`;
+  const authUrl = `https://www.facebook.com/dialog/oauth?client_id=${APP_ID}&redirect_uri=${BASE_URL}/auth/callback&scope=instagram_business_basic,instagram_business_manage_messages&response_type=code`;
   res.redirect(authUrl);
 });
 
