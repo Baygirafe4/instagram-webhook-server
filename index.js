@@ -15,7 +15,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // Instagram OAuth данные (AL-IG)
 const IG_APP_ID = "1598302307924157";
-const IG_APP_SECRET = "d58db85080922d0bab48";
+const IG_APP_SECRET = process.env.IG_APP_SECRET;
 const REDIRECT_URI = "https://instagram-webhook-server-ae6c.onrender.com/auth/callback";
 
 // ─── База бизнесов ────────────────────────────────────────────────────────────
