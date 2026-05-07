@@ -109,7 +109,7 @@ app.get("/auth/instagram", (req, res) => {
     "instagram_business_manage_messages"
   ].join(",");
 
-  const authUrl = `https://www.instagram.com/oauth/authorize?client_id=${APP_ID}&redirect_uri=${BASE_URL}/auth/callback&scope=${scopes}&response_type=code`;
+  const authUrl = `https://api.instagram.com/oauth/authorize?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(BASE_URL + '/auth/callback')}&scope=${scopes}&response_type=code`;
   res.redirect(authUrl);
 });
 
