@@ -123,17 +123,7 @@ app.get("/auth/callback", async (req, res) => {
 
   try {
     // Меняем code на access token
-    const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: APP_ID,
-        client_secret: APP_SECRET,
-        grant_type: "authorization_code",
-        redirect_uri: `${BASE_URL}/auth/callback`,
-        code
-      })
-    });
+    
 
     const tokenData = await tokenRes.json();
     console.log("Token response:", tokenData);
