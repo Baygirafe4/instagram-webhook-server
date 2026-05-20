@@ -42,7 +42,7 @@ if (process.env.ARTONELI_TOKEN) {
       name: "Artoneli",
       accessToken: process.env.ARTONELI_TOKEN,
       telegramChatId: null,
-      description: "Название: Artoneli\n(Опишите ваш бизнес, цены и услуги)",
+      description: "Название: Barber Shop\nЧасы работы: с 12:00 до 17:00\n\nМАСТЕРА:\n- Артем — длинные стрижки\n- Даник — короткие стрижки\n\nУСЛУГИ И ЦЕНЫ:\n- Мужская стрижка — 75 zł\n- Борода — 50 zł\n- Комбо (стрижка + борода) — 100 zł\n\nЗАПИСЬ: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa?do=invite#ba_s=dl_1",
       connectedAt: new Date().toISOString()
     });
   }
