@@ -83,7 +83,7 @@ function getConversation(key) {
 }
 
 // ─── Системный промпт ─────────────────────────────────────────────────────────
-function buildSystemPrompt(business) {
+function buildSystemPrompt(business, lang = 'польский') {
   const now = new Date();
   const currentDateTime = now.toLocaleString('pl-PL', { 
     timeZone: 'Europe/Warsaw',
@@ -98,7 +98,7 @@ function buildSystemPrompt(business) {
   return `Ты — вежливый AI-ассистент бизнеса "${business.name}".
 Отвечай коротко, по-человечески.
 
-ЯЗЫК: Посмотри ТОЛЬКО на самое первое сообщение клиента в этом разговоре и отвечай на том языке. Игнорируй предыдущие языки. Написал по-польски — только польский. По-русски — только русский. По-английски — только английский. Никогда не меняй язык.
+ЯЗЫК: Отвечай ТОЛЬКО на ${lang}. Это обязательно.
 
 СЕЙЧАС: ${currentDateTime} (Варшава)
 
