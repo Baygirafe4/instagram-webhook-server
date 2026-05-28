@@ -297,8 +297,10 @@ app.post("/api/webhook", async (req, res) => {
 function detectLanguage(text) {
   const russianChars = /[а-яёА-ЯЁ]/;
   const polishChars = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
+  const polishWords = /\b(czesc|hej|siema|chce|na|sie|tak|nie|dzien|dobry|witaj|umowic|strzyzenie|fryzjer|chcialbym|chcialabym|zapisac|prosze)\b/i;
+  
   if (russianChars.test(text)) return 'русский';
-  if (polishChars.test(text)) return 'польский';
+  if (polishChars.test(text) || polishWords.test(text)) return 'польский';
   return 'английский';
 }
 async function handleMessage(senderId, text, business) {
