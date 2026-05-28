@@ -323,8 +323,8 @@ const aiReply = await askClaude(conv.messages, business, lang);
   conv.messages.push({ role: "assistant", content: aiReply });
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
-  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
-    const cleanReply = aiReply.replace("[ЗАЯВКА_ГОТОВА]", "").trim();
+  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]") || aiReply.includes("[ZAJAVKA_GOTOVA]") || aiReply.includes("[ZAYAVKA_GOTOVA]")) {
+    const cleanReply = aiReply.replace(/\[З?A?A?JAVKA_GOTOVA\]|\[ЗАЯВКА_ГОТОВА\]|\[ZAYAVKA_GOTOVA\]/g, "").trim();
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
     await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
     return;
