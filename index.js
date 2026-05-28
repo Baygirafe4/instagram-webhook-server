@@ -293,6 +293,13 @@ app.post("/api/webhook", async (req, res) => {
 });
 
 // ─── Главная логика ───────────────────────────────────────────────────────────
+function detectLanguage(text) {
+  const russianChars = /[а-яёА-ЯЁ]/;
+  const polishChars = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
+  if (russianChars.test(text)) return 'русский';
+  if (polishChars.test(text)) return 'польский';
+  return 'английский';
+}
 async function handleMessage(senderId, text, business) {
   const conv = getConversation(`${business.igId}_${senderId}`);
 
@@ -304,7 +311,8 @@ async function handleMessage(senderId, text, business) {
   conv.messages.push({ role: "user", content: text });
   if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
 
-  const aiReply = await askClaude(conv.messages, business);
+  const lang = detectLanguage(conv.messages[0]?.content || text);
+const aiReply = await askClaude(conv.messages, business, lang);
 
   if (!aiReply) {
     await sendInstagramMessage(senderId, "Извините, произошла ошибка. Попробуйте позже.", business.accessToken);
@@ -333,7 +341,7 @@ async function handleMessage(senderId, text, business) {
 }
 
 // ─── Claude API ───────────────────────────────────────────────────────────────
-async function askClaude(messages, business) {
+async function askClaude(messages, business, lang = 'польский') {
   if (!ANTHROPIC_API_KEY) return null;
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
