@@ -42,7 +42,27 @@ if (process.env.ARTONELI_TOKEN) {
       name: "Artoneli",
       accessToken: process.env.ARTONELI_TOKEN,
       telegramChatId: null,
-      description: "Название: Barber Shop\nЧасы работы: с 12:00 до 17:00\n\nМАСТЕРА:\n- Артем — длинные стрижки\n- Даник — короткие стрижки\n\nУСЛУГИ И ЦЕНЫ:\n- Мужская стрижка — 75 zł\n- Борода — 50 zł\n- Комбо (стрижка + борода) — 100 zł\n\nЗАПИСЬ: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa?do=invite#ba_s=dl_1",
+      description: `Название: BARBERSHOP BARBERSQUAD
+
+⭐ ПОПУЛЯРНЫЕ УСЛУГИ:
+✂️ Стрижка + мытьё + укладка — 95 zł (40 мин)
+💈 Combo стрижка + борода — 145 zł (1 ч 10 мин)
+🆕 Первая стрижка — 85 zł (40 мин)
+
+📋 ВСЕ УСЛУГИ:
+- Express Boki (только виски) — 75 zł (30 мин)
+- Стрижка + депиляция воском — 100 zł (1 ч)
+- Стрижка + маска для лица — 125 zł (1 ч)
+- Только контуры — 35 zł (15 мин)
+- Стрижка бороды + тонирование — 70 zł (30 мин)
+- Моделирование бороды — 75 zł (30 мин)
+- Стрижка машинкой — 65 zł (25 мин)
+- Стрижка длинных волос — 125 zł (1 ч)
+- Укладка волос — 35 zł (15 мин)
+- Buzz Cut — 85 zł (30 мин)
+- Стрижка + массаж головы + воск — 130 zł (1 ч)
+
+📅 ЗАПИСЬ: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa`,
       connectedAt: new Date().toISOString()
     });
   }
