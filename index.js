@@ -324,7 +324,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
   if (aiReply.includes("[ЗАЯВКА_ГОТОВА]") || aiReply.includes("[ZAJAVKA_GOTOVA]") || aiReply.includes("[ZAYAVKA_GOTOVA]")) {
-    const cleanReply = aiReply.replace(/\[З?A?A?JAVKA_GOTOVA\]|\[ЗАЯВКА_ГОТОВА\]|\[ZAYAVKA_GOTOVA\]/g, "").trim();
+    const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
     await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
     return;
