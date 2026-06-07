@@ -74,6 +74,7 @@ function getBusinessByIgId(igId) {
 
 // ─── Память диалогов ──────────────────────────────────────────────────────────
 const conversations = {};
+const pendingReschedule = {};
 
 // ─── Внутренний календарь ─────────────────────────────────────────────────────
 const bookedSlots = {};
@@ -366,7 +367,13 @@ const aiReply = await askClaude(conv.messages, business, lang);
       }
     }
     
-    await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
+    if (pendingReschedule[senderId]) {
+  const newTime = pendingReschedule[senderId];
+  delete pendingReschedule[senderId];
+  await notifyDirector(`✏️ Клиент подтвердил новое время: ${newTime}`, senderId, conv, business);
+} else {
+  await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
+}
     return;
 }
 
@@ -494,11 +501,12 @@ app.post("/telegram/webhook", async (req, res) => {
       (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
     ) || Object.values(businesses)[0];
 
-    if (data.startsWith("time_")) {
+   if (data.startsWith("time_")) {
   const parts = data.replace("time_", "").split("_");
   const time = parts[parts.length - 1];
   const senderId = parts.slice(0, -1).join("_");
   await answerCallback();
+  pendingReschedule[senderId] = time;
   await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
 }
