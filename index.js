@@ -381,41 +381,26 @@ async function notifyDirector(title, senderId, conv, business) {
     .map(m => `${m.role === "user" ? "👤 Клиент" : "🤖 Бот"}: ${m.content}`)
     .join("\n\n");
 
-  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}\n\n⏰ Выберите время для клиента:`;
+  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}`;
 
-  const timeSlots = [];
-  const times = [];
-  for (let h = 10; h <= 18; h++) {
-    times.push(`${h}:00`);
-    times.push(`${h}:30`);
-  }
-  times.push("19:00");
-
-  const rows = [];
-  for (let i = 0; i < times.length; i += 4) {
-    rows.push(times.slice(i, i + 4).map(t => ({
-      text: t,
-      callback_data: `time_${senderId}_${t}`
-    })));
-  }
-  rows.push([
-    { text: "✅ Подтвердить", callback_data: `confirm_${senderId}` },
-    { text: "❌ Отменить", callback_data: `cancel_${senderId}` }
-  ]);
-  rows.push([
-    { text: "✏️ Другое время", callback_data: `reschedule_${senderId}` },
-    { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
-  ]);
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "🕐 Выбрать время", callback_data: `slots_${senderId}` },
+        { text: "❌ Отменить", callback_data: `cancel_${senderId}` }
+      ],
+      [
+        { text: "✏️ Своё время", callback_data: `reschedule_${senderId}` },
+        { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
+      ]
+    ]
+  };
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        reply_markup: { inline_keyboard: rows }
-      })
+      body: JSON.stringify({ chat_id: chatId, text: message, reply_markup: keyboard })
     });
     const data = await res.json();
     console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
@@ -460,6 +445,37 @@ app.post("/telegram/webhook", async (req, res) => {
       await answerCallback();
       await sendTg(`✅ Время ${time} выбрано! Клиент уведомлён.`);
       await sendInstagramMessage(senderId, `✅ Ваша запись подтверждена на ${time}! Ждём вас 💈`, business.accessToken);
+    }
+
+    if (data.startsWith("slots_")) {
+      const senderId = data.replace("slots_", "");
+      await answerCallback();
+      
+      const times = [];
+      for (let h = 10; h <= 18; h++) {
+        times.push(`${h}:00`);
+        times.push(`${h}:30`);
+      }
+      times.push("19:00");
+
+      const rows = [];
+      for (let i = 0; i < times.length; i += 4) {
+        rows.push(times.slice(i, i + 4).map(t => ({
+          text: t,
+          callback_data: `time_${senderId}_${t}`
+        })));
+      }
+      rows.push([{ text: "✏️ Написать своё время", callback_data: `reschedule_${senderId}` }]);
+
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "⏰ Выберите свободный слот:",
+          reply_markup: { inline_keyboard: rows }
+        })
+      });
     }
 
     if (data.startsWith("confirm_")) {
