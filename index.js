@@ -75,6 +75,31 @@ function getBusinessByIgId(igId) {
 // ─── Память диалогов ──────────────────────────────────────────────────────────
 const conversations = {};
 
+// ─── Внутренний календарь ─────────────────────────────────────────────────────
+const bookedSlots = {};
+
+function isSlotTaken(date, time, businessId) {
+  const key = `${businessId}_${date}_${time}`;
+  return bookedSlots[key] === true;
+}
+
+function bookSlot(date, time, businessId) {
+  const key = `${businessId}_${date}_${time}`;
+  bookedSlots[key] = true;
+}
+
+function getNearestFreeSlots(date, time, businessId) {
+  const times = [];
+  for (let h = 10; h <= 18; h++) {
+    times.push(`${h}:00`);
+    times.push(`${h}:30`);
+  }
+  times.push("19:00");
+
+  const freeSlots = times.filter(t => !isSlotTaken(date, t, businessId));
+  return freeSlots.slice(0, 6);
+}
+
 function getConversation(key) {
   if (!conversations[key]) {
     conversations[key] = { messages: [], humanMode: false };
@@ -108,7 +133,7 @@ ${business.description}
 ПРАВИЛА:
 1. Если клиент хочет записаться — задавай ТОЛЬКО ОДИН вопрос за раз. Сначала спроси имя. Когда ответит — спроси услугу. Когда ответит — спроси дату и время. Когда ответит — спроси телефон. Никогда не задавай несколько вопросов сразу.
 2. Не принимай запись на уже прошедшее время — вежливо предложи другое.
-3. Когда собрал ВСЕ данные — напиши красивое резюме заявки БЕЗ звёздочек, добавь ссылку: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa и в конце невидимо для клиента добавь только: [ЗАЯВКА_ГОТОВА]
+3. 3. Когда клиент называет желаемое время — сначала проверь через системную функцию занято ли оно. Если занято — предложи ближайшее свободное. Когда собрал ВСЕ данные — напиши резюме заявки, добавь ссылку: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa и в конце добавь: [ЗАЯВКА_ГОТОВА]
 4. Если клиент пишет "хочу с человеком" или "администратор" — ответь что передаёшь и добавь: [НУЖЕН_ЧЕЛОВЕК]
 5. Не придумывай данные которых нет выше.
 6. Не отвечай на вопросы не связанные с бизнесом.
@@ -326,12 +351,24 @@ const aiReply = await askClaude(conv.messages, business, lang);
   conv.messages.push({ role: "assistant", content: aiReply });
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
-  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]") || aiReply.includes("[ZAJAVKA_GOTOVA]") || aiReply.includes("[ZAYAVKA_GOTOVA]")) {
+  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
     const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
+    
+    // Извлекаем дату и время из последних сообщений и сохраняем слот
+    const lastBotMessage = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
+    if (lastBotMessage) {
+      const timeMatch = lastBotMessage.content.match(/(\d{1,2}):(\d{2})/);
+      const dateMatch = lastBotMessage.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+      if (timeMatch && dateMatch) {
+        bookSlot(dateMatch[0], timeMatch[0], business.igId);
+        console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
+      }
+    }
+    
     await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
     return;
-  }
+}
 
   if (aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
     const cleanReply = aiReply.replace("[НУЖЕН_ЧЕЛОВЕК]", "").trim();
