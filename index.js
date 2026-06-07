@@ -381,8 +381,13 @@ async function notifyDirector(title, senderId, conv, business) {
     .map(m => `${m.role === "user" ? "👤 Клиент" : "🤖 Бот"}: ${m.content}`)
     .join("\n\n");
 
-  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}`;
+  const lastMessages = conv.messages.slice(-6);
+const clientInfo = lastMessages
+  .filter(m => m.role === "user")
+  .map(m => m.content)
+  .join(", ");
 
+const message = `${title}\n\n👤 Клиент написал: ${clientInfo}\nID клиента: ${senderId}`;
   const keyboard = {
     inline_keyboard: [
       [
@@ -486,11 +491,11 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     if (data.startsWith("cancel_")) {
-      const senderId = data.replace("cancel_", "");
-      await answerCallback();
-      await sendTg("❌ Заявка отменена.");
-      await sendInstagramMessage(senderId, "К сожалению это время недоступно. Хотите выбрать другое? 😊", business.accessToken);
-    }
+  const senderId = data.replace("cancel_", "");
+  await answerCallback();
+  await sendTg("❌ Заявка отменена. Клиент уведомлён.");
+  await sendInstagramMessage(senderId, "К сожалению барбер занят в это время 😔 На какое другое время хотите записаться?", business.accessToken);
+}
 
     if (data.startsWith("reschedule_")) {
       const senderId = data.replace("reschedule_", "");
