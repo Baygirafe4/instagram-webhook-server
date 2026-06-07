@@ -506,6 +506,7 @@ app.post("/telegram/webhook", async (req, res) => {
   const time = parts[parts.length - 1];
   const senderId = parts.slice(0, -1).join("_");
   await answerCallback();
+     console.log(`Reschedule set for senderId: ${senderId}, time: ${time}`);
   pendingReschedule[senderId] = time;
   await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
