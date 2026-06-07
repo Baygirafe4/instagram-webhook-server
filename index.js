@@ -381,20 +381,31 @@ async function notifyDirector(title, senderId, conv, business) {
     .map(m => `${m.role === "user" ? "👤 Клиент" : "🤖 Бот"}: ${m.content}`)
     .join("\n\n");
 
-  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}`;
+  const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}\n\n⏰ Выберите время для клиента:`;
 
-  const keyboard = {
-    inline_keyboard: [
-      [
-        { text: "✅ Подтвердить", callback_data: `confirm_${senderId}` },
-        { text: "❌ Отменить", callback_data: `cancel_${senderId}` }
-      ],
-      [
-        { text: "📅 Другое время", callback_data: `reschedule_${senderId}` },
-        { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
-      ]
-    ]
-  };
+  const timeSlots = [];
+  const times = [];
+  for (let h = 10; h <= 18; h++) {
+    times.push(`${h}:00`);
+    times.push(`${h}:30`);
+  }
+  times.push("19:00");
+
+  const rows = [];
+  for (let i = 0; i < times.length; i += 4) {
+    rows.push(times.slice(i, i + 4).map(t => ({
+      text: t,
+      callback_data: `time_${senderId}_${t}`
+    })));
+  }
+  rows.push([
+    { text: "✅ Подтвердить", callback_data: `confirm_${senderId}` },
+    { text: "❌ Отменить", callback_data: `cancel_${senderId}` }
+  ]);
+  rows.push([
+    { text: "✏️ Другое время", callback_data: `reschedule_${senderId}` },
+    { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
+  ]);
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -403,7 +414,7 @@ async function notifyDirector(title, senderId, conv, business) {
       body: JSON.stringify({
         chat_id: chatId,
         text: message,
-        reply_markup: keyboard
+        reply_markup: { inline_keyboard: rows }
       })
     });
     const data = await res.json();
@@ -412,6 +423,93 @@ async function notifyDirector(title, senderId, conv, business) {
     console.error("Telegram error:", err);
   }
 }
+
+// ─── Ожидание своего времени от барбера ──────────────────────────────────────
+const waitingForCustomTime = {};
+
+// ─── Telegram callback handler ────────────────────────────────────────────────
+app.post("/telegram/webhook", async (req, res) => {
+  const body = req.body;
+
+  // Обработка кнопок
+  if (body.callback_query) {
+    const { data, message } = body.callback_query;
+    const chatId = message.chat.id;
+
+    const answerCallback = () => fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`,
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callback_query_id: body.callback_query.id }) }
+    );
+
+    const sendTg = (text) => fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }) }
+    );
+
+    const businesses = loadBusinesses();
+    const business = Object.values(businesses).find(b => 
+      (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
+    ) || Object.values(businesses)[0];
+
+    if (data.startsWith("time_")) {
+      const parts = data.replace("time_", "").split("_");
+      const time = parts[parts.length - 1];
+      const senderId = parts.slice(0, -1).join("_");
+      await answerCallback();
+      await sendTg(`✅ Время ${time} выбрано! Клиент уведомлён.`);
+      await sendInstagramMessage(senderId, `✅ Ваша запись подтверждена на ${time}! Ждём вас 💈`, business.accessToken);
+    }
+
+    if (data.startsWith("confirm_")) {
+      const senderId = data.replace("confirm_", "");
+      await answerCallback();
+      await sendTg("✅ Заявка подтверждена!");
+      await sendInstagramMessage(senderId, "✅ Ваша запись подтверждена! Ждём вас 💈", business.accessToken);
+    }
+
+    if (data.startsWith("cancel_")) {
+      const senderId = data.replace("cancel_", "");
+      await answerCallback();
+      await sendTg("❌ Заявка отменена.");
+      await sendInstagramMessage(senderId, "К сожалению это время недоступно. Хотите выбрать другое? 😊", business.accessToken);
+    }
+
+    if (data.startsWith("reschedule_")) {
+      const senderId = data.replace("reschedule_", "");
+      await answerCallback();
+      waitingForCustomTime[chatId] = senderId;
+      await sendTg("✏️ Напишите удобное время (например: завтра в 14:30)");
+      await sendInstagramMessage(senderId, "Это время занято 😔 Барбер подберёт другое время — ожидайте!", business.accessToken);
+    }
+  }
+
+  // Обработка текстового ответа барбера с кастомным временем
+  if (body.message && body.message.text) {
+    const chatId = body.message.chat.id;
+    const text = body.message.text;
+
+    if (waitingForCustomTime[chatId]) {
+      const senderId = waitingForCustomTime[chatId];
+      delete waitingForCustomTime[chatId];
+
+      const businesses = loadBusinesses();
+      const business = Object.values(businesses).find(b =>
+        (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
+      ) || Object.values(businesses)[0];
+
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: `✅ Время "${text}" отправлено клиенту!` })
+      });
+      await sendInstagramMessage(senderId, `Барбер предлагает другое время: ${text} — подходит? 😊`, business.accessToken);
+    }
+  }
+
+  res.sendStatus(200);
+});
 
 // ─── Instagram API ────────────────────────────────────────────────────────────
 async function sendInstagramMessage(recipientId, text, accessToken) {
