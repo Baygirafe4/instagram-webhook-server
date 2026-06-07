@@ -383,11 +383,28 @@ async function notifyDirector(title, senderId, conv, business) {
 
   const message = `${title}\n\n🏢 ${business.name}\nID: ${senderId}\n\n📝 История:\n${history}`;
 
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "✅ Подтвердить", callback_data: `confirm_${senderId}` },
+        { text: "❌ Отменить", callback_data: `cancel_${senderId}` }
+      ],
+      [
+        { text: "📅 Другое время", callback_data: `reschedule_${senderId}` },
+        { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
+      ]
+    ]
+  };
+
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: message })
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        reply_markup: keyboard
+      })
     });
     const data = await res.json();
     console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
