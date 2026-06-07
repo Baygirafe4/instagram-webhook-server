@@ -424,7 +424,18 @@ const clientInfo = lastMessages
   .map(m => m.content)
   .join(", ");
 
-const message = `${title}\n\n👤 Клиент написал: ${clientInfo}\nID клиента: ${senderId}`;
+const msgs = conv.messages.filter(m => m.role === "user").map(m => m.content);
+const lastBot = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content || "";
+
+const serviceMatch = lastBot.match(/Услуга[:\s]+([^\n]+)/i) || lastBot.match(/Стрижка[^\n]*/i);
+const timeMatch = lastBot.match(/Время[:\s]+([^\n]+)/i) || lastBot.match(/\d{1,2}\s*(июня|июля|мая)[^\n]*/i);
+const phoneMatch = msgs.join(" ").match(/\+?[\d\s\-]{9,}/);
+
+const service = serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана";
+const time = timeMatch ? timeMatch[0].replace(/Время[:\s]*/i, "").trim() : "не указано";
+const phone = phoneMatch ? phoneMatch[0].trim() : "не указан";
+
+const message = `📅 Новая заявка!\n\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
   const keyboard = {
     inline_keyboard: [
       [
