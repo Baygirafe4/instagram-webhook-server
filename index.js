@@ -435,7 +435,10 @@ const service = serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, ""
 const time = timeMatch ? timeMatch[0].replace(/Время[:\s]*/i, "").trim() : "не указано";
 const phone = phoneMatch ? phoneMatch[0].trim() : "не указан";
 
-const message = `📅 Новая заявка!\n\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
+const nameMatch = lastBot.match(/Имя[:\s]+([^\n]+)/i) || msgs.join(" ").match(/меня зовут\s+(\w+)/i);
+const name = nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано";
+
+const message = `📅 Новая заявка!\n\n👤 Имя: ${name}\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
   const keyboard = {
     inline_keyboard: [
       [
@@ -492,13 +495,13 @@ app.post("/telegram/webhook", async (req, res) => {
     ) || Object.values(businesses)[0];
 
     if (data.startsWith("time_")) {
-      const parts = data.replace("time_", "").split("_");
-      const time = parts[parts.length - 1];
-      const senderId = parts.slice(0, -1).join("_");
-      await answerCallback();
-      await sendTg(`✅ Время ${time} выбрано! Клиент уведомлён.`);
-      await sendInstagramMessage(senderId, `✅ Ваша запись подтверждена на ${time}! Ждём вас 💈`, business.accessToken);
-    }
+  const parts = data.replace("time_", "").split("_");
+  const time = parts[parts.length - 1];
+  const senderId = parts.slice(0, -1).join("_");
+  await answerCallback();
+  await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
+  await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
+}
 
     if (data.startsWith("slots_")) {
       const senderId = data.replace("slots_", "");
