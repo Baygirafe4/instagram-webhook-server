@@ -8,7 +8,7 @@ let db;
 async function connectDB() {
   if (!MONGODB_URI) return;
   try {
-    const client = new MongoClient(MONGODB_URI);
+    const client = new MongoClient(MONGODB_URI, { tls: true, tlsAllowInvalidCertificates: true });
     await client.connect();
     db = client.db("fastreply");
     console.log("MongoDB: ✅ подключено");
