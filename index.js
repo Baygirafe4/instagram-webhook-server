@@ -94,6 +94,41 @@ function getBusinessByIgId(igId) {
 const conversations = {};
 const pendingReschedule = {};
 
+// ─── MongoDB helpers ──────────────────────────────────────────────────────────
+async function saveConversation(key, data) {
+  if (!db) return;
+  await db.collection("conversations").updateOne(
+    { key },
+    { $set: { key, ...data, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
+
+async function loadConversation(key) {
+  if (!db) return null;
+  return await db.collection("conversations").findOne({ key });
+}
+
+async function savePendingReschedule(senderId, time) {
+  if (!db) return;
+  await db.collection("pending").updateOne(
+    { senderId },
+    { $set: { senderId, time, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
+
+async function loadPendingReschedule(senderId) {
+  if (!db) return null;
+  const doc = await db.collection("pending").findOne({ senderId });
+  return doc ? doc.time : null;
+}
+
+async function deletePendingReschedule(senderId) {
+  if (!db) return;
+  await db.collection("pending").deleteOne({ senderId });
+}
+
 // ─── Внутренний календарь ─────────────────────────────────────────────────────
 const bookedSlots = {};
 
