@@ -130,28 +130,25 @@ async function deletePendingReschedule(senderId) {
 }
 
 // ─── Внутренний календарь ─────────────────────────────────────────────────────
-const bookedSlots = {};
-
-function isSlotTaken(date, time, businessId) {
-  const key = `${businessId}_${date}_${time}`;
-  return bookedSlots[key] === true;
+// ─── Слоты в MongoDB ──────────────────────────────────────────────────────────
+async function isSlotTaken(date, time, businessId) {
+  if (!db) return false;
+  const doc = await db.collection("slots").findOne({ businessId, date, time });
+  return !!doc;
 }
 
-function bookSlot(date, time, businessId) {
-  const key = `${businessId}_${date}_${time}`;
-  bookedSlots[key] = true;
+async function bookSlot(date, time, businessId) {
+  if (!db) return;
+  await db.collection("slots").updateOne(
+    { businessId, date, time },
+    { $set: { businessId, date, time, bookedAt: new Date() } },
+    { upsert: true }
+  );
 }
 
-function getNearestFreeSlots(date, time, businessId) {
-  const times = [];
-  for (let h = 10; h <= 18; h++) {
-    times.push(`${h}:00`);
-    times.push(`${h}:30`);
-  }
-  times.push("19:00");
-
-  const freeSlots = times.filter(t => !isSlotTaken(date, t, businessId));
-  return freeSlots.slice(0, 6);
+async function freeSlot(date, time, businessId) {
+  if (!db) return;
+  await db.collection("slots").deleteOne({ businessId, date, time });
 }
 
 function getConversation(key) {
@@ -398,6 +395,11 @@ async function handleMessage(senderId, text, business) {
   if (conv.awaitingTimeConfirm && /^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
     const confirmedTime = conv.awaitingTimeConfirm;
     conv.awaitingTimeConfirm = null;
+    // Освобождаем старый слот, бронируем новый
+const oldSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-3)[0]?.content.match(/(\d{1,2}):(\d{2})/);
+const dateSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+if (oldSlotMatch && dateSlotMatch) await freeSlot(dateSlotMatch[0], oldSlotMatch[0], business.igId);
+if (dateSlotMatch) await bookSlot(dateSlotMatch[0], confirmedTime, business.igId);
 conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
     await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime);
@@ -435,7 +437,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
       const timeMatch = lastBotMessage.content.match(/(\d{1,2}):(\d{2})/);
       const dateMatch = lastBotMessage.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
       if (timeMatch && dateMatch) {
-        bookSlot(dateMatch[0], timeMatch[0], business.igId);
+        await bookSlot(dateMatch[0], timeMatch[0], business.igId);
         console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
       }
     }
