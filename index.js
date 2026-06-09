@@ -422,10 +422,11 @@ const aiReply = await askClaude(conv.messages, business, lang);
       }
     }
     
-    if (pendingReschedule[senderId]) {
-  const newTime = pendingReschedule[senderId];
-  delete pendingReschedule[senderId];
-  await notifyDirector(`✏️ Клиент подтвердил новое время: ${newTime}`, senderId, conv, business);
+    const pendingTime = await loadPendingReschedule(senderId);
+console.log(`Checking pendingReschedule for ${senderId}:`, pendingTime);
+if (pendingTime) {
+  await deletePendingReschedule(senderId);
+  await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business);
 } else {
   await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
 }
@@ -562,7 +563,7 @@ app.post("/telegram/webhook", async (req, res) => {
   const senderId = parts.slice(0, -1).join("_");
   await answerCallback();
      console.log(`Reschedule set for senderId: ${senderId}, time: ${time}`);
-  pendingReschedule[senderId] = time;
+  await savePendingReschedule(senderId, time);
   await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
 }
