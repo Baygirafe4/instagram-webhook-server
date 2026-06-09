@@ -388,6 +388,16 @@ function detectLanguage(text) {
 async function handleMessage(senderId, text, business) {
   const conv = getConversation(`${business.igId}_${senderId}`);
 
+  // Проверяем ждёт ли подтверждения времени
+  if (conv.awaitingTimeConfirm && /^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
+    const confirmedTime = conv.awaitingTimeConfirm;
+    conv.awaitingTimeConfirm = null;
+    await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
+    await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business);
+    await deletePendingReschedule(senderId);
+    return;
+  }
+
   if (conv.humanMode) {
     await notifyDirector(`💬 Клиент пишет:\n"${text}"`, senderId, conv, business);
     return;
@@ -562,10 +572,15 @@ app.post("/telegram/webhook", async (req, res) => {
   const time = parts[parts.length - 1];
   const senderId = parts.slice(0, -1).join("_");
   await answerCallback();
-     console.log(`Reschedule set for senderId: ${senderId}, time: ${time}`);
   await savePendingReschedule(senderId, time);
   await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
+  
+  // Сбрасываем разговор чтобы следующее "да" было правильно обработано
+  const convKey = `${business.igId}_${senderId}`;
+  if (conversations[convKey]) {
+    conversations[convKey].awaitingTimeConfirm = time;
+  }
 }
 
     if (data.startsWith("slots_")) {
