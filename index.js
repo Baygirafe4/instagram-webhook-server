@@ -484,7 +484,7 @@ async function askClaude(messages, business, lang = 'польский') {
 }
 
 // ─── Telegram ─────────────────────────────────────────────────────────────────
-async function notifyDirector(title, senderId, conv, business) {
+async function notifyDirector(title, senderId, conv, business, overrideTime = null) {
   const chatId = business.telegramChatId || TELEGRAM_CHAT_ID;
   if (!TELEGRAM_BOT_TOKEN || !chatId) return;
 
@@ -507,7 +507,7 @@ const timeMatch = lastBot.match(/Время[:\s]+([^\n]+)/i) || lastBot.match(/\
 const phoneMatch = msgs.join(" ").match(/\+?[\d\s\-]{9,}/);
 
 const service = serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана";
-const time = timeMatch ? timeMatch[0].replace(/Время[:\s]*/i, "").trim() : "не указано";
+const time = overrideTime || (timeMatch ? timeMatch[0].replace(/Время[:\s]*/i, "").trim() : "не указано");
 const phone = phoneMatch ? phoneMatch[0].trim() : "не указан";
 
 const nameMatch = lastBot.match(/Имя[:\s]+([^\n]+)/i) || msgs.join(" ").match(/меня зовут\s+(\w+)/i);
