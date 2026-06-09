@@ -407,6 +407,18 @@ conv.completed = true;
     return;
   }
 
+  // Проверяем занятость слота перед ответом бота
+const slotCheckMatch = text.match(/(\d{1,2})[:.:](\d{2})/);
+const dateCheckMatch = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+if (slotCheckMatch && dateCheckMatch) {
+  const checkTime = `${slotCheckMatch[1]}:${slotCheckMatch[2]}`;
+  const taken = await isSlotTaken(dateCheckMatch[0], checkTime, business.igId);
+  if (taken) {
+    await sendInstagramMessage(senderId, `К сожалению ${checkTime} уже занято 😔 Выберите другое время!`, business.accessToken);
+    return;
+  }
+}
+
   if (conv.humanMode) {
     await notifyDirector(`💬 Клиент пишет:\n"${text}"`, senderId, conv, business);
     return;
