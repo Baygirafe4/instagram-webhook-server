@@ -180,6 +180,12 @@ function buildSystemPrompt(business, lang = 'польский') {
 ЯЗЫК: Отвечай ТОЛЬКО на ${lang}. Это обязательно. Используй ТОЛЬКО буквы того языка на котором отвечаешь. Никогда не смешивай алфавиты.
 
 СЕЙЧАС: ${currentDateTime} (Варшава)
+КАЛЕНДАРЬ БЛИЖАЙШИХ 14 ДНЕЙ:
+${Array.from({length: 14}, (_, i) => {
+  const d = new Date(Date.now() + (i+1) * 86400000);
+  const label = i === 0 ? 'Завтра' : i === 1 ? 'Послезавтра' : `+${i+1} дней`;
+  return `- ${label}: ${d.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'long', day: 'numeric', month: 'long' })}`;
+}).join('\n')}
 
 ИНФОРМАЦИЯ О БИЗНЕСЕ:
 ${business.description}
