@@ -513,7 +513,7 @@ const phone = phoneMatch ? phoneMatch[0].trim() : "не указан";
 const nameMatch = lastBot.match(/Имя[:\s]+([^\n]+)/i) || msgs.join(" ").match(/меня зовут\s+(\w+)/i);
 const name = nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано";
 
-const message = `📅 Новая заявка!\n\n👤 Имя: ${name}\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
+const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
   const keyboard = {
     inline_keyboard: [
       [
