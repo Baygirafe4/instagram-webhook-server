@@ -1,4 +1,22 @@
 const express = require("express");
+const { MongoClient } = require("mongodb");
+
+// ─── MongoDB ──────────────────────────────────────────────────────────────────
+const MONGODB_URI = process.env.MONGODB_URI;
+let db;
+
+async function connectDB() {
+  if (!MONGODB_URI) return;
+  try {
+    const client = new MongoClient(MONGODB_URI);
+    await client.connect();
+    db = client.db("fastreply");
+    console.log("MongoDB: ✅ подключено");
+  } catch (err) {
+    console.error("MongoDB error:", err);
+  }
+}
+connectDB();
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
