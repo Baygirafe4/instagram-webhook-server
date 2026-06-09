@@ -392,6 +392,7 @@ async function handleMessage(senderId, text, business) {
   if (conv.awaitingTimeConfirm && /^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
     const confirmedTime = conv.awaitingTimeConfirm;
     conv.awaitingTimeConfirm = null;
+conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
     await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business);
     await deletePendingReschedule(senderId);
@@ -418,6 +419,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
   if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
+    if (conv.completed) return;
     const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
     
