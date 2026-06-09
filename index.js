@@ -394,7 +394,7 @@ async function handleMessage(senderId, text, business) {
     conv.awaitingTimeConfirm = null;
 conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
-    await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business);
+    await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime);
     await deletePendingReschedule(senderId);
     return;
   }
