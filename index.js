@@ -412,6 +412,22 @@ conv.completed = true;
     return;
   }
 
+  // Проверяем занятость если клиент называет время
+const userTimeMatch = text.match(/(\d{1,2})[:.]\s*(\d{2})/);
+if (userTimeMatch && !conv.awaitingTimeConfirm) {
+  const userTime = `${userTimeMatch[1]}:${userTimeMatch[2].padStart(2, '0')}`;
+  const allBotMessages = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ");
+  const userDateMatch = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i)
+    || allBotMessages.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+  if (userDateMatch) {
+    const taken = await isSlotTaken(userDateMatch[0], userTime, business.igId);
+    if (taken) {
+      await sendInstagramMessage(senderId, `К сожалению ${userTime} ${userDateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+      return;
+    }
+  }
+}
+
   conv.messages.push({ role: "user", content: text });
   if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
 
