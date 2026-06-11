@@ -159,7 +159,15 @@ function getConversation(key) {
 }
 
 // ─── Системный промпт ─────────────────────────────────────────────────────────
-function buildSystemPrompt(business, lang = 'польский') {
+async function buildSystemPrompt(business, lang = 'польский') {
+  let bookedInfo = '';
+  if (db) {
+    const slots = await db.collection('slots').find({ businessId: business.igId }).toArray();
+    if (slots.length > 0) {
+      bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
+        slots.map(s => `- ${s.date} в ${s.time}`).join('\n');
+    }
+  }
   const now = new Date();
   const currentDateTime = now.toLocaleString('pl-PL', { 
     timeZone: 'Europe/Warsaw',
@@ -183,6 +191,7 @@ ${Array.from({length: 14}, (_, i) => {
   const label = i === 0 ? 'Завтра' : i === 1 ? 'Послезавтра' : `+${i+1} дней`;
   return `- ${label}: ${d.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'long', day: 'numeric', month: 'long' })}`;
 }).join('\n')}
+${bookedInfo}
 
 ИНФОРМАЦИЯ О БИЗНЕСЕ:
 ${business.description}
