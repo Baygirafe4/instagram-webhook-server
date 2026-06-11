@@ -539,7 +539,7 @@ async function askClaude(messages, business, lang = 'польский') {
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 500,
-        system: buildSystemPrompt(business, lang),
+        system: await buildSystemPrompt(business, lang),
         messages
       })
     });
