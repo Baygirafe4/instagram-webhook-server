@@ -416,13 +416,44 @@ conv.completed = true;
 const userTimeMatch = text.match(/(\d{1,2})[:.]\s*(\d{2})/);
 if (userTimeMatch && !conv.awaitingTimeConfirm) {
   const userTime = `${userTimeMatch[1]}:${userTimeMatch[2].padStart(2, '0')}`;
-  const allBotMessages = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ");
-  const userDateMatch = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i)
-    || allBotMessages.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-  if (userDateMatch) {
-    const taken = await isSlotTaken(userDateMatch[0], userTime, business.igId);
+  const tz = 'Europe/Warsaw';
+  const getDateStr = (daysAhead) => {
+    const d = new Date(Date.now() + daysAhead * 86400000);
+    return d.toLocaleString('pl-PL', { timeZone: tz, day: 'numeric', month: 'long' });
+  };
+  const currentDayNum = new Date().toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' }).toLowerCase();
+  const days = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 0 };
+  const dayNamesRU = { понедельник: 1, вторник: 2, среда: 3, четверг: 4, пятница: 5, суббота: 6, воскресенье: 0 };
+  const dayNamesPL = { poniedzialek: 1, wtorek: 2, sroda: 3, czwartek: 4, piatek: 5, sobota: 6, niedziela: 0 };
+  const currentNum = days[currentDayNum] ?? 0;
+
+  let checkDate = null;
+  if (/сегодня|dzisiaj|today/i.test(text)) {
+    checkDate = getDateStr(0);
+  } else if (/послезавтра|pojutrze/i.test(text)) {
+    checkDate = getDateStr(2);
+  } else if (/завтра|jutro|tomorrow/i.test(text)) {
+    checkDate = getDateStr(1);
+  } else {
+    for (const [name, num] of Object.entries({...dayNamesRU, ...dayNamesPL})) {
+      if (new RegExp(name, 'i').test(text)) {
+        let diff = num - currentNum;
+        if (diff <= 0) diff += 7;
+        checkDate = getDateStr(diff);
+        break;
+      }
+    }
+    if (!checkDate) {
+      const dateInText = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i)
+        || conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+      if (dateInText) checkDate = dateInText[0];
+    }
+  }
+
+  if (checkDate) {
+    const taken = await isSlotTaken(checkDate, userTime, business.igId);
     if (taken) {
-      await sendInstagramMessage(senderId, `К сожалению ${userTime} ${userDateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+      await sendInstagramMessage(senderId, `К сожалению ${userTime} ${checkDate} уже занято 😔 Выберите другое время!`, business.accessToken);
       return;
     }
   }
