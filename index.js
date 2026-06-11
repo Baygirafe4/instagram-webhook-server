@@ -407,18 +407,6 @@ conv.completed = true;
     return;
   }
 
-  // Проверяем занятость слота перед ответом бота
-const slotCheckMatch = text.match(/(\d{1,2})[:.:](\d{2})/);
-const dateCheckMatch = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-if (slotCheckMatch && dateCheckMatch) {
-  const checkTime = `${slotCheckMatch[1]}:${slotCheckMatch[2]}`;
-  const taken = await isSlotTaken(dateCheckMatch[0], checkTime, business.igId);
-  if (taken) {
-    await sendInstagramMessage(senderId, `К сожалению ${checkTime} уже занято 😔 Выберите другое время!`, business.accessToken);
-    return;
-  }
-}
-
   if (conv.humanMode) {
     await notifyDirector(`💬 Клиент пишет:\n"${text}"`, senderId, conv, business);
     return;
@@ -445,14 +433,19 @@ const aiReply = await askClaude(conv.messages, business, lang);
     
     // Извлекаем дату и время из последних сообщений и сохраняем слот
     const lastBotMessage = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
-    if (lastBotMessage) {
-      const timeMatch = lastBotMessage.content.match(/(\d{1,2}):(\d{2})/);
-      const dateMatch = lastBotMessage.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-      if (timeMatch && dateMatch) {
-        await bookSlot(dateMatch[0], timeMatch[0], business.igId);
-        console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
-      }
+if (lastBotMessage) {
+  const timeMatch = lastBotMessage.content.match(/(\d{1,2}):(\d{2})/);
+  const dateMatch = lastBotMessage.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+  if (timeMatch && dateMatch) {
+    const taken = await isSlotTaken(dateMatch[0], timeMatch[0], business.igId);
+    if (taken) {
+      await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} ${dateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+      return;
     }
+    await bookSlot(dateMatch[0], timeMatch[0], business.igId);
+    console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
+  }
+}
     
     const pendingTime = await loadPendingReschedule(senderId);
 console.log(`Checking pendingReschedule for ${senderId}:`, pendingTime);
