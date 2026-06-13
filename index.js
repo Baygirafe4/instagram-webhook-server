@@ -664,6 +664,7 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
 
 // ─── Ожидание своего времени от барбера ──────────────────────────────────────
 const waitingForCustomTime = {};
+const menuSent = {};
 
 // ─── Telegram callback handler ────────────────────────────────────────────────
 app.post("/telegram/webhook", async (req, res) => {
