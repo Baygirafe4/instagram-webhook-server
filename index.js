@@ -768,7 +768,7 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
     const text = body.message.text;
 
     // Команда /меню
-if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot && String(chatId) === String(TELEGRAM_CHAT_ID)) {
+if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot) {
   const parts = text.split(" ");
   const day = parts[1] ? parseInt(parts[1]) : new Date().getDate();
   const now = new Date();
