@@ -506,14 +506,18 @@ const aiReply = await askClaude(conv.messages, business, lang);
       // Сохраняем заявку для напоминания
 if (db) {
   await db.collection("appointments").insertOne({
-    senderId,
-    businessId: business.igId,
-    accessToken: business.accessToken,
-    date: dateMatch[0],
-    time: timeMatch[0],
-    createdAt: new Date(),
-    reminded: false
-  });
+  senderId,
+  businessId: business.igId,
+  accessToken: business.accessToken,
+  date: dateMatch[0],
+  time: timeMatch[0],
+  name: nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано",
+  service: serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана",
+  telegramMessageId: conv.telegramMessageId || null,
+  status: "confirmed",
+  createdAt: new Date(),
+  reminded: false
+});
 }
       console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
     }
@@ -760,6 +764,47 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
   if (body.message && body.message.text) {
     const chatId = body.message.chat.id;
     const text = body.message.text;
+
+    // Команда /меню
+if (text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) {
+  const parts = text.split(" ");
+  const day = parts[1] ? parseInt(parts[1]) : new Date().getDate();
+  const now = new Date();
+  const monthStr = now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', month: 'long' });
+  const dateKey = `${day} ${monthStr}`;
+
+  const times = [];
+  for (let h = 10; h <= 18; h++) {
+    times.push(`${h}:00`);
+    times.push(`${h}:30`);
+  }
+  times.push("19:00");
+
+  const appointments = db ? await db.collection("appointments").find({
+    businessId: business.igId,
+    date: { $regex: String(day) },
+    status: { $ne: "cancelled" }
+  }).toArray() : [];
+
+  let menu = `📅 Расписание на ${dateKey}:\n\n`;
+  for (const time of times) {
+    const apt = appointments.find(a => a.time === time);
+    if (apt) {
+      const link = apt.telegramMessageId ? 
+        `https://t.me/c/${String(chatId).replace("-100", "")}/${apt.telegramMessageId}` : "";
+      menu += `📌 ${time} — ${apt.name} (${apt.service})${link ? ` [→ заявка](${link})` : ""}\n`;
+    } else {
+      menu += `✅ ${time} — свободно\n`;
+    }
+  }
+
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: menu, parse_mode: "Markdown" })
+  });
+  return;
+}
 
     if (waitingForCustomTime[chatId]) {
       const senderId = waitingForCustomTime[chatId];
