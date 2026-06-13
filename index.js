@@ -766,7 +766,7 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
     const text = body.message.text;
 
     // Команда /меню
-if (text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) {
+if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot) {
   const parts = text.split(" ");
   const day = parts[1] ? parseInt(parts[1]) : new Date().getDate();
   const now = new Date();
@@ -809,7 +809,7 @@ const appointments = db ? await db.collection("appointments").find({
     body: JSON.stringify({ chat_id: chatId, text: menu, parse_mode: "Markdown" })
   });
   return;
-}
+    }
 
     if (waitingForCustomTime[chatId]) {
       const senderId = waitingForCustomTime[chatId];
