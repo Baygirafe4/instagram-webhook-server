@@ -526,6 +526,7 @@ if (db) {
 if (pendingTime) {
   const pendingDoc = db ? await db.collection("pending").findOne({ senderId }) : null;
   const replyToId = pendingDoc?.telegramMessageId || null;
+  console.log(`replyToId для ${senderId}:`, replyToId);
   await deletePendingReschedule(senderId);
   await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime, replyToId);
 } else {
