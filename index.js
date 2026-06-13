@@ -674,6 +674,7 @@ const waitingForCustomTime = {};
 // ─── Telegram callback handler ────────────────────────────────────────────────
 app.post("/telegram/webhook", async (req, res) => {
   const body = req.body;
+  res.sendStatus(200);
 
   // Обработка кнопок
   if (body.callback_query) {
@@ -772,6 +773,8 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
   if (body.message && body.message.text) {
     const chatId = body.message.chat.id;
     const text = body.message.text;
+    const messageTime = body.message.date * 1000;
+if (Date.now() - messageTime > 30000) return res.sendStatus(200);
 
     // Команда /меню
 console.log(`TG message: chatId=${chatId}, text=${text}`);
