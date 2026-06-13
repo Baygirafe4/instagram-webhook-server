@@ -163,11 +163,16 @@ function getConversation(key) {
 async function buildSystemPrompt(business, lang = 'польский') {
   let bookedInfo = '';
   if (db) {
-    const slots = await db.collection('slots').find({ businessId: business.igId }).toArray();
-    if (slots.length > 0) {
-      bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
-        slots.map(s => `- ${s.date} в ${s.time}`).join('\n');
-    }
+    const today = new Date();
+const slots = await db.collection('slots').find({ businessId: business.igId }).toArray();
+const futureSlots = slots.filter(s => {
+  if (!s.createdAt) return true;
+  return new Date(s.createdAt) > new Date(today.getFullYear(), today.getMonth(), today.getDate());
+});
+if (futureSlots.length > 0) {
+  bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
+    futureSlots.map(s => `- ${s.date} в ${s.time}`).join('\n');
+}
   }
   const now = new Date();
   const currentDateTime = now.toLocaleString('pl-PL', { 
@@ -896,7 +901,15 @@ if (currentHour !== 8) return;
 // Запускаем каждый час
 setInterval(sendReminders, 60 * 60 * 1000);
 // И сразу при старте
-sendReminders();
+
+// Очищаем старые слоты при старте
+if (db) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  db.collection('slots').deleteMany({}).then(() => {
+    console.log('Старые слоты очищены');
+  });
+}  
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
