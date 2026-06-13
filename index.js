@@ -769,7 +769,9 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
 
     // Команда /меню
 console.log(`TG message: chatId=${chatId}, text=${text}`);
-if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot) {
+if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot && !menuSent[chatId]) {
+  menuSent[chatId] = true;
+  setTimeout(() => { delete menuSent[chatId]; }, 3000);
   const parts = text.split(" ");
   const day = parts[1] ? parseInt(parts[1]) : new Date().getDate();
   const now = new Date();
