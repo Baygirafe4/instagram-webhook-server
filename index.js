@@ -768,7 +768,7 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
     const text = body.message.text;
 
     // Команда /меню
-if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot) {
+if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot && String(chatId) === String(TELEGRAM_CHAT_ID)) {
   const parts = text.split(" ");
   const day = parts[1] ? parseInt(parts[1]) : new Date().getDate();
   const now = new Date();
@@ -799,7 +799,7 @@ const appointments = db ? await db.collection("appointments").find({
     if (apt) {
       const link = apt.telegramMessageId ? 
         `https://t.me/c/${String(chatId).replace("-100", "")}/${apt.telegramMessageId}` : "";
-      menu += `📌 ${time} — ${apt.name} (${apt.service})${link ? ` [→ заявка](${link})` : ""}\n`;
+      menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service || "не указана"})\n`;
     } else {
       menu += `✅ ${time} — свободно\n`;
     }
