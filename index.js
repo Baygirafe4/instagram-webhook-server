@@ -633,6 +633,9 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
       body: JSON.stringify({ chat_id: chatId, text: message, reply_markup: keyboard })
     });
     const data = await res.json();
+    if (data.ok && data.result?.message_id) {
+  conv.telegramMessageId = data.result.message_id;
+}
     console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
   } catch (err) {
     console.error("Telegram error:", err);
@@ -657,11 +660,11 @@ app.post("/telegram/webhook", async (req, res) => {
         body: JSON.stringify({ callback_query_id: body.callback_query.id }) }
     );
 
-    const sendTg = (text) => fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }) }
-    );
+   const sendTg = (text, replyToId = null) => fetch(
+  `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+  { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, ...(replyToId ? { reply_to_message_id: replyToId } : {}) }) }
+);
 
     const businesses = loadBusinesses();
     const business = Object.values(businesses).find(b => 
@@ -674,7 +677,9 @@ app.post("/telegram/webhook", async (req, res) => {
   const senderId = parts.slice(0, -1).join("_");
   await answerCallback();
   await savePendingReschedule(senderId, time);
-  await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`);
+  const convKey = `${business.igId}_${senderId}`;
+const replyId = conversations[convKey]?.telegramMessageId;
+await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`, replyId);
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
   
   // Сбрасываем разговор чтобы следующее "да" было правильно обработано
