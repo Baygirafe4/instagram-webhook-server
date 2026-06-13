@@ -413,7 +413,9 @@ if (oldSlotMatch && dateSlotMatch) await freeSlot(dateSlotMatch[0], oldSlotMatch
 if (dateSlotMatch) await bookSlot(dateSlotMatch[0], confirmedTime, business.igId);
 conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
-    await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime);
+    const pendingDocConfirm = db ? await db.collection("pending").findOne({ senderId }) : null;
+const replyToIdConfirm = pendingDocConfirm?.telegramMessageId || null;
+await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime, replyToIdConfirm);
     await deletePendingReschedule(senderId);
     return;
   }
