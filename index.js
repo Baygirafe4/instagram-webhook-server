@@ -207,7 +207,8 @@ ${business.description}
 8. НИКОГДА не используй звёздочки ** вокруг текста. Пиши обычным текстом без форматирования.
 9. НИКОГДА не используй кириллические буквы когда пишешь на польском или английском. Проверяй каждое слово.
 10. Когда клиент подтверждает новое время барбера — ОБЯЗАТЕЛЬНО напиши резюме заявки и в самом конце на отдельной строке добавь [ЗАЯВКА_ГОТОВА]. Без этой метки заявка не будет зарегистрирована.
-11. Если клиент отрицает или говорит что время не подходит — спроси на какое время он хотел бы записаться.`;
+11. Если клиент отрицает или говорит что время не подходит — спроси на какое время он хотел бы записаться.`
+12. Если клиент пишет что не сможет прийти или хочет отменить запись — спроси: "Хотите перенести запись на другое время или отменить совсем?" и жди ответа. Если хочет перенести — спроси на какое время. Если отменить — скажи что запись отменена и будем рады видеть в другой раз.;
 }
 
 // ─── OAuth страница подключения ───────────────────────────────────────────────
@@ -499,6 +500,18 @@ const aiReply = await askClaude(conv.messages, business, lang);
         return;
       }
       await bookSlot(dateMatch[0], timeMatch[0], business.igId);
+      // Сохраняем заявку для напоминания
+if (db) {
+  await db.collection("appointments").insertOne({
+    senderId,
+    businessId: business.igId,
+    accessToken: business.accessToken,
+    date: dateMatch[0],
+    time: timeMatch[0],
+    createdAt: new Date(),
+    reminded: false
+  });
+}
       console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
     }
   }
@@ -750,6 +763,53 @@ async function sendInstagramMessage(recipientId, text, accessToken) {
   if (!response.ok) console.error("Instagram error:", data);
   else console.log("Instagram: ✅ отправлено");
 }
+
+// ─── Напоминания ──────────────────────────────────────────────────────────────
+async function sendReminders() {
+  if (!db) return;
+
+  const currentHour = parseInt(new Date().toLocaleString('pl-PL', { 
+  timeZone: 'Europe/Warsaw', 
+  hour: 'numeric', 
+  hour12: false 
+}));
+if (currentHour !== 8) return;
+  
+  const now = new Date();
+  const tomorrow = new Date(Date.now() + 86400000);
+  const tomorrowStr = tomorrow.toLocaleString('pl-PL', { 
+    timeZone: 'Europe/Warsaw', 
+    day: 'numeric', 
+    month: 'long' 
+  });
+  
+  const appointments = await db.collection("appointments").find({ 
+    reminded: false,
+    date: { $regex: tomorrowStr.split(' ')[0] }
+  }).toArray();
+  
+  for (const apt of appointments) {
+    try {
+      await sendInstagramMessage(
+        apt.senderId, 
+        `👋 Привет! Напоминаем что завтра в ${apt.time} ждём вас в барбершопе 💈 Если планы изменились — напишите нам!`,
+        apt.accessToken
+      );
+      await db.collection("appointments").updateOne(
+        { _id: apt._id },
+        { $set: { reminded: true } }
+      );
+      console.log(`Напоминание отправлено: ${apt.senderId} на ${apt.date} ${apt.time}`);
+    } catch (err) {
+      console.error("Ошибка напоминания:", err);
+    }
+  }
+}
+
+// Запускаем каждый час
+setInterval(sendReminders, 60 * 60 * 1000);
+// И сразу при старте
+sendReminders();
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
