@@ -523,12 +523,14 @@ if (db) {
 
   // Отправляем барберу в Telegram
   const pendingTime = await loadPendingReschedule(senderId);
-  if (pendingTime) {
-    await deletePendingReschedule(senderId);
-    await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime);
-  } else {
-    await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
-  }
+if (pendingTime) {
+  const pendingDoc = db ? await db.collection("pending").findOne({ senderId }) : null;
+  const replyToId = pendingDoc?.telegramMessageId || null;
+  await deletePendingReschedule(senderId);
+  await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime, replyToId);
+} else {
+  await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
+}
   return;
 }
 
@@ -636,6 +638,14 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
     const data = await res.json();
     if (data.ok && data.result?.message_id) {
   conv.telegramMessageId = data.result.message_id;
+  // Сохраняем в MongoDB
+  if (db) {
+    await db.collection("pending").updateOne(
+      { senderId },
+      { $set: { telegramMessageId: data.result.message_id } },
+      { upsert: true }
+    );
+  }
 }
     console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
   } catch (err) {
