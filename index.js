@@ -483,35 +483,39 @@ const aiReply = await askClaude(conv.messages, business, lang);
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
   if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
-    if (conv.completed) return;
-    const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
-    await sendInstagramMessage(senderId, cleanReply, business.accessToken);
-    
-    // Извлекаем дату и время из последних сообщений и сохраняем слот
-    const lastBotMessage = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
-if (lastBotMessage) {
-  const timeMatch = lastBotMessage.content.match(/(\d{1,2}):(\d{2})/);
-  const dateMatch = lastBotMessage.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-  if (timeMatch && dateMatch) {
-    const taken = await isSlotTaken(dateMatch[0], timeMatch[0], business.igId);
-    if (taken) {
-      await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} ${dateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
-      return;
+  if (conv.completed) return;
+  conv.completed = true;
+
+  // Сначала проверяем занятость
+  const lastBotMsg = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
+  if (lastBotMsg) {
+    const timeMatch = lastBotMsg.content.match(/(\d{1,2}):(\d{2})/);
+    const dateMatch = lastBotMsg.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
+    if (timeMatch && dateMatch) {
+      const taken = await isSlotTaken(dateMatch[0], timeMatch[0], business.igId);
+      if (taken) {
+        conv.completed = false;
+        await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} ${dateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+        return;
+      }
+      await bookSlot(dateMatch[0], timeMatch[0], business.igId);
+      console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
     }
-    await bookSlot(dateMatch[0], timeMatch[0], business.igId);
-    console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
   }
-}
-    
-    const pendingTime = await loadPendingReschedule(senderId);
-console.log(`Checking pendingReschedule for ${senderId}:`, pendingTime);
-if (pendingTime) {
-  await deletePendingReschedule(senderId);
-  await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business);
-} else {
-  await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
-}
-    return;
+
+  // Отправляем клиенту
+  const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
+  await sendInstagramMessage(senderId, cleanReply, business.accessToken);
+
+  // Отправляем барберу в Telegram
+  const pendingTime = await loadPendingReschedule(senderId);
+  if (pendingTime) {
+    await deletePendingReschedule(senderId);
+    await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime);
+  } else {
+    await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
+  }
+  return;
 }
 
   if (aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
