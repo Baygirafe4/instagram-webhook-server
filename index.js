@@ -841,7 +841,6 @@ const appointments = db ? await db.collection("appointments").find({
     }
   }
 
-  res.sendStatus(200);
 });
 
 // ─── Instagram API ────────────────────────────────────────────────────────────
