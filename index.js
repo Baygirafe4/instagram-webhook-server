@@ -30,6 +30,7 @@ const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || "fastreply_secret";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const menuSent = {};
 
 // Instagram OAuth данные (AL-IG)
 const IG_APP_ID = "1598302307924157";
@@ -664,7 +665,6 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
 
 // ─── Ожидание своего времени от барбера ──────────────────────────────────────
 const waitingForCustomTime = {};
-const menuSent = {};
 
 // ─── Telegram callback handler ────────────────────────────────────────────────
 app.post("/telegram/webhook", async (req, res) => {
