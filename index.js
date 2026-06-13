@@ -504,7 +504,9 @@ const aiReply = await askClaude(conv.messages, business, lang);
       }
       await bookSlot(dateMatch[0], timeMatch[0], business.igId);
       // Сохраняем заявку для напоминания
-if (db) {
+const nameMatch = aiReply.match(/Имя[:\s]+([^\n]+)/i);
+const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
+      if (db) {
   await db.collection("appointments").insertOne({
   senderId,
   businessId: business.igId,
