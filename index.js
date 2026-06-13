@@ -684,7 +684,6 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
   
   // Сбрасываем разговор чтобы следующее "да" было правильно обработано
-  const convKey = `${business.igId}_${senderId}`;
   if (conversations[convKey]) {
     conversations[convKey].awaitingTimeConfirm = time;
   }
