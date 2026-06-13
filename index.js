@@ -586,7 +586,7 @@ async function askClaude(messages, business, lang = 'польский') {
 }
 
 // ─── Telegram ─────────────────────────────────────────────────────────────────
-async function notifyDirector(title, senderId, conv, business, overrideTime = null) {
+async function notifyDirector(title, senderId, conv, business, overrideTime = null, replyToMessageId = null) {
   const chatId = business.telegramChatId || TELEGRAM_CHAT_ID;
   if (!TELEGRAM_BOT_TOKEN || !chatId) return;
 
@@ -633,7 +633,7 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: message, reply_markup: keyboard })
+      body: JSON.stringify({ chat_id: chatId, text: message, reply_markup: keyboard, ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}) })
     });
     const data = await res.json();
     if (data.ok && data.result?.message_id) {
