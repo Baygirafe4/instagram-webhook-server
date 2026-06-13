@@ -508,6 +508,16 @@ const aiReply = await askClaude(conv.messages, business, lang);
         await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} ${dateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
         return;
       }
+
+      // Удаляем старые слоты этого клиента на эту дату
+if (db) {
+  await db.collection("appointments").updateMany(
+    { senderId, date: dateMatch[0], businessId: business.igId },
+    { $set: { status: "cancelled" } }
+  );
+  await db.collection("slots").deleteMany({ businessId: business.igId, date: dateMatch[0] });
+}
+      
       await bookSlot(dateMatch[0], timeMatch[0], business.igId);
       // Сохраняем заявку для напоминания
 const nameMatch = aiReply.match(/Имя[:\s]+([^\n]+)/i);
