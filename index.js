@@ -780,11 +780,14 @@ if (text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) {
   }
   times.push("19:00");
 
-  const appointments = db ? await db.collection("appointments").find({
-    businessId: business.igId,
-    date: { $regex: String(day) },
-    status: { $ne: "cancelled" }
-  }).toArray() : [];
+  const businessForMenu = Object.values(BUSINESSES || {}).find(b => b.telegramChatId == chatId) 
+  || (db ? await db.collection("businesses").findOne({ telegramChatId: String(chatId) }) : null);
+
+const appointments = db ? await db.collection("appointments").find({
+  businessId: businessForMenu?.igId,
+  date: { $regex: String(day) },
+  status: { $ne: "cancelled" }
+}).toArray() : [];
 
   let menu = `📅 Расписание на ${dateKey}:\n\n`;
   for (const time of times) {
