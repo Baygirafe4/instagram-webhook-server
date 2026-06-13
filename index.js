@@ -780,8 +780,10 @@ if (text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) {
   }
   times.push("19:00");
 
-  const businessForMenu = Object.values(BUSINESSES || {}).find(b => b.telegramChatId == chatId) 
-  || (db ? await db.collection("businesses").findOne({ telegramChatId: String(chatId) }) : null);
+  const businesses = loadBusinesses();
+const businessForMenu = Object.values(businesses).find(b => 
+  (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
+) || Object.values(businesses)[0];
 
 const appointments = db ? await db.collection("appointments").find({
   businessId: businessForMenu?.igId,
