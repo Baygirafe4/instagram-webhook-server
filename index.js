@@ -429,6 +429,23 @@ if (db) {
 }
 const dateSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
 if (dateSlotMatch) await bookSlot(dateSlotMatch[0], confirmedTime, business.igId);
+    if (dateSlotMatch && db) {
+  const nameM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Имя[:\s]+([^\n]+)/i);
+  const serviceM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Услуга[:\s]+([^\n]+)/i);
+  await db.collection("appointments").insertOne({
+    senderId,
+    businessId: business.igId,
+    accessToken: business.accessToken,
+    date: dateSlotMatch[0],
+    time: confirmedTime,
+    name: nameM ? nameM[1]?.trim() : "не указано",
+    service: serviceM ? serviceM[1]?.trim() : "не указана",
+    telegramMessageId: conv.telegramMessageId || null,
+    status: "confirmed",
+    createdAt: new Date(),
+    reminded: false
+  });
+}
 conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
     const pendingDocConfirm = db ? await db.collection("pending").findOne({ senderId }) : null;
