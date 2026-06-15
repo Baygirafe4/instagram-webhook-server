@@ -413,9 +413,21 @@ async function handleMessage(senderId, text, business) {
     const confirmedTime = conv.awaitingTimeConfirm;
     conv.awaitingTimeConfirm = null;
     // Освобождаем старый слот, бронируем новый
-const oldSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-3)[0]?.content.match(/(\d{1,2}):(\d{2})/);
+if (db) {
+  const oldApt = await db.collection("appointments").findOne({ 
+    senderId, businessId: business.igId, status: "confirmed" 
+  });
+  if (oldApt) {
+    await db.collection("slots").deleteOne({ 
+      businessId: business.igId, date: oldApt.date, time: oldApt.time 
+    });
+    await db.collection("appointments").updateOne(
+      { _id: oldApt._id },
+      { $set: { status: "cancelled" } }
+    );
+  }
+}
 const dateSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-if (oldSlotMatch && dateSlotMatch) await freeSlot(dateSlotMatch[0], oldSlotMatch[0], business.igId);
 if (dateSlotMatch) await bookSlot(dateSlotMatch[0], confirmedTime, business.igId);
 conv.completed = true;
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
