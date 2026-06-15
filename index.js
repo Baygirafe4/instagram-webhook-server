@@ -521,7 +521,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
   conv.messages.push({ role: "assistant", content: aiReply });
   console.log("=== Claude reply ===\n", aiReply, "\n===================");
 
-  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]")) {
+  if (aiReply.includes("[ЗАЯВКА_ГОТОВА]") || aiReply.includes("[ЗАЯВКА_ГОТOВА]") || /\[ЗАЯВКА.ГОТОВ/i.test(aiReply)) {
   if (conv.completed) return;
   conv.completed = true;
 
