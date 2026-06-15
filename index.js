@@ -511,11 +511,18 @@ const aiReply = await askClaude(conv.messages, business, lang);
 
       // Удаляем старые слоты этого клиента на эту дату
 if (db) {
-  await db.collection("appointments").updateMany(
-    { senderId, date: dateMatch[0], businessId: business.igId },
-    { $set: { status: "cancelled" } }
-  );
-  await db.collection("slots").deleteMany({ businessId: business.igId, date: dateMatch[0] });
+  const oldApt = await db.collection("appointments").findOne({ 
+    senderId, businessId: business.igId, status: "confirmed" 
+  });
+  if (oldApt) {
+    await db.collection("slots").deleteOne({ 
+      businessId: business.igId, date: oldApt.date, time: oldApt.time 
+    });
+    await db.collection("appointments").updateOne(
+      { _id: oldApt._id },
+      { $set: { status: "cancelled" } }
+    );
+  }
 }
       
       await bookSlot(dateMatch[0], timeMatch[0], business.igId);
