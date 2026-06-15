@@ -415,7 +415,8 @@ async function handleMessage(senderId, text, business) {
     // Освобождаем старый слот, бронируем новый
 if (db) {
   const oldApt = await db.collection("appointments").findOne({ 
-    senderId, businessId: business.igId, status: "confirmed" 
+    senderId, businessId: business.igId, status: { $ne: "cancelled" }
+}, { sort: { createdAt: -1 }
   });
   if (oldApt) {
     await db.collection("slots").deleteOne({ 
@@ -540,9 +541,9 @@ const aiReply = await askClaude(conv.messages, business, lang);
 
       // Удаляем старые слоты этого клиента на эту дату
 if (db) {
-  const oldApt = await db.collection("appointments").findOne({ 
-    senderId, businessId: business.igId, status: "confirmed" 
-  });
+  const oldApt = await db.collection("appointments").findOne({
+    senderId, businessId: business.igId, status: { $ne: "cancelled" }
+  }, { sort: { createdAt: -1 } });
   if (oldApt) {
     await db.collection("slots").deleteOne({ 
       businessId: business.igId, date: oldApt.date, time: oldApt.time 
