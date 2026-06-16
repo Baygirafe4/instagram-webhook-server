@@ -854,9 +854,8 @@ const appointments = db ? await db.collection("appointments").find({
   for (const time of times) {
     const apt = appointments.find(a => a.time === time);
     if (apt) {
-      const link = apt.telegramMessageId ? 
-        `https://t.me/c/${String(chatId).replace("-100", "")}/${apt.telegramMessageId}` : "";
-      menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service || "не указана"})\n`;
+      const link = apt.telegramMessageId ? `https://t.me/c/${String(chatId).replace("-100", "")}/${apt.telegramMessageId}` : null;
+menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service || "не указана"})${link ? ` [→](${link})` : ""}\n`;
     } else {
       menu += `✅ ${time} — свободно\n`;
     }
