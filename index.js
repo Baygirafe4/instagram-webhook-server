@@ -499,8 +499,9 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
     await deletePendingReschedule(senderId);
     return;
     } else {
-      // Клиент отказался от предложенного времени — сбрасываем флаг и продолжаем как обычно
+      // Клиент отказался от предложенного времени — сбрасываем флаги и продолжаем как обычно
       conv.awaitingTimeConfirm = null;
+      conv.completed = false;
       await persistConv(convKey);
     }
   }
