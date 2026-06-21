@@ -134,7 +134,7 @@ async function deletePendingReschedule(senderId) {
 // ─── Слоты в MongoDB ──────────────────────────────────────────────────────────
 async function isSlotTaken(date, time, businessId) {
   if (!db) return false;
-  const doc = await db.collection("slots").findOne({ businessId, date, time });
+  const doc = await db.collection("appointments").findOne({ businessId, date, time, status: { $ne: "cancelled" } });
   return !!doc;
 }
 
@@ -164,10 +164,10 @@ async function buildSystemPrompt(business, lang = 'польский') {
   let bookedInfo = '';
   if (db) {
     const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
-const slots = await db.collection('slots').find({ businessId: business.igId, date: { $gte: todayIso } }).toArray();
-if (slots.length > 0) {
+const bookedApts = await db.collection('appointments').find({ businessId: business.igId, date: { $gte: todayIso }, status: { $ne: "cancelled" } }).toArray();
+if (bookedApts.length > 0) {
   bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
-    slots.map(s => `- ${s.date} в ${s.time}`).join('\n');
+    bookedApts.map(s => `- ${s.date} в ${s.time}`).join('\n');
 }
   }
   const now = new Date();
@@ -624,7 +624,7 @@ if (pendingTime) {
   return;
 }
 
-  await sendInstagramMessage(senderId, aiReply, business.accessToken);
+  await sendInstagramMessage(senderId, aiReply.replace(/\[ДАТА:\d{4}-\d{2}-\d{2}\]/g, "").trim(), business.accessToken);
 }
 
 // ─── Claude API ───────────────────────────────────────────────────────────────
