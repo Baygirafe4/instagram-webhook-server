@@ -451,7 +451,8 @@ async function handleMessage(senderId, text, business) {
   const conv = await getConversation(convKey);
 
   // Проверяем ждёт ли подтверждения времени
-  if (conv.awaitingTimeConfirm && /^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
+  if (conv.awaitingTimeConfirm) {
+    if (/^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
     const confirmedTime = conv.awaitingTimeConfirm;
     conv.awaitingTimeConfirm = null;
     // Освобождаем старый слот, бронируем новый
@@ -497,6 +498,11 @@ const replyToIdConfirm = pendingDocConfirm?.telegramMessageId || null;
 await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime, replyToIdConfirm);
     await deletePendingReschedule(senderId);
     return;
+    } else {
+      // Клиент отказался от предложенного времени — сбрасываем флаг и продолжаем как обычно
+      conv.awaitingTimeConfirm = null;
+      await persistConv(convKey);
+    }
   }
 
   if (conv.humanMode) {
