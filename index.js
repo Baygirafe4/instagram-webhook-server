@@ -163,15 +163,11 @@ function getConversation(key) {
 async function buildSystemPrompt(business, lang = 'польский') {
   let bookedInfo = '';
   if (db) {
-    const today = new Date();
-const slots = await db.collection('slots').find({ businessId: business.igId }).toArray();
-const futureSlots = slots.filter(s => {
-  if (!s.createdAt) return true;
-  return new Date(s.createdAt) > new Date(today.getFullYear(), today.getMonth(), today.getDate());
-});
-if (futureSlots.length > 0) {
+    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+const slots = await db.collection('slots').find({ businessId: business.igId, date: { $gte: todayIso } }).toArray();
+if (slots.length > 0) {
   bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
-    futureSlots.map(s => `- ${s.date} в ${s.time}`).join('\n');
+    slots.map(s => `- ${s.date} в ${s.time}`).join('\n');
 }
   }
   const now = new Date();
@@ -195,12 +191,15 @@ if (futureSlots.length > 0) {
 ${Array.from({length: 14}, (_, i) => {
   const d = new Date(Date.now() + (i+1) * 86400000);
   const label = i === 0 ? 'Завтра' : i === 1 ? 'Послезавтра' : `+${i+1} дней`;
-  return `- ${label}: ${d.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'long', day: 'numeric', month: 'long' })}`;
+  const iso = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+  return `- ${label}: ${d.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', weekday: 'long', day: 'numeric', month: 'long' })} (ISO: ${iso})`;
 }).join('\n')}
 ${bookedInfo}
 
 ИНФОРМАЦИЯ О БИЗНЕСЕ:
 ${business.description}
+
+ОБЯЗАТЕЛЬНО О ДАТАХ: Каждый раз когда называешь клиенту КОНКРЕТНУЮ дату (предлагаешь время, подтверждаешь запись, упоминаешь дату записи в любом сообщении) — добавь в самом конце этого сообщения скрытый тег [ДАТА:YYYY-MM-DD] с этой датой в формате ISO, используя календарь выше. Этот тег система уберёт автоматически, клиент его не увидит. Без этого тега запись не сохранится правильно.
 
 ПРАВИЛА:
 1. Если клиент хочет записаться — задавай ТОЛЬКО ОДИН вопрос за раз. Сначала спроси имя. Когда ответит — спроси услугу. Когда ответит — спроси дату и время. Когда ответит — спроси телефон. Никогда не задавай несколько вопросов сразу. Никогда не переспрашивай и не уточняй то что клиент уже сказал.
@@ -396,6 +395,16 @@ app.post("/api/webhook", async (req, res) => {
 });
 
 // ─── Главная логика ───────────────────────────────────────────────────────────
+function extractIsoDate(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const match = m.content.match(/\[ДАТА:(\d{4}-\d{2}-\d{2})\]/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 function detectLanguage(text) {
   const russianChars = /[а-яёА-ЯЁ]/;
   const polishChars = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
@@ -428,16 +437,16 @@ if (db) {
     );
   }
 }
-const dateSlotMatch = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-if (dateSlotMatch) await bookSlot(dateSlotMatch[0], confirmedTime, business.igId);
-    if (dateSlotMatch && db) {
+const isoDate431 = extractIsoDate(conv.messages);
+if (isoDate431) await bookSlot(isoDate431, confirmedTime, business.igId);
+    if (isoDate431 && db) {
   const nameM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Имя[:\s]+([^\n]+)/i);
   const serviceM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Услуга[:\s]+([^\n]+)/i);
   await db.collection("appointments").insertOne({
     senderId,
     businessId: business.igId,
     accessToken: business.accessToken,
-    date: dateSlotMatch[0],
+    date: isoDate431,
     time: confirmedTime,
     name: nameM ? nameM[1]?.trim() : "не указано",
     service: serviceM ? serviceM[1]?.trim() : "не указана",
@@ -468,7 +477,7 @@ if (userTimeMatch && !conv.awaitingTimeConfirm) {
   const tz = 'Europe/Warsaw';
   const getDateStr = (daysAhead) => {
     const d = new Date(Date.now() + daysAhead * 86400000);
-    return d.toLocaleString('pl-PL', { timeZone: tz, day: 'numeric', month: 'long' });
+    return d.toLocaleDateString('en-CA', { timeZone: tz });
   };
   const currentDayNum = new Date().toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' }).toLowerCase();
   const days = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 0 };
@@ -484,7 +493,7 @@ if (userTimeMatch && !conv.awaitingTimeConfirm) {
   } else if (/завтра|jutro|tomorrow/i.test(text)) {
     checkDate = getDateStr(1);
   } else {
-    for (const [name, num] of Object.entries({...dayNamesRU, ...dayNamesPL})) {
+    for (const [name, num] of Object.entries({...dayNamesRU, ...dayNamesPL, ...days})) {
       if (new RegExp(name, 'i').test(text)) {
         let diff = num - currentNum;
         if (diff <= 0) diff += 7;
@@ -493,9 +502,7 @@ if (userTimeMatch && !conv.awaitingTimeConfirm) {
       }
     }
     if (!checkDate) {
-      const dateInText = text.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i)
-        || conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-      if (dateInText) checkDate = dateInText[0];
+      checkDate = extractIsoDate(conv.messages);
     }
   }
 
@@ -530,12 +537,12 @@ const aiReply = await askClaude(conv.messages, business, lang);
   const lastBotMsg = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
   if (lastBotMsg) {
     const timeMatch = lastBotMsg.content.match(/(\d{1,2}):(\d{2})/);
-    const dateMatch = lastBotMsg.content.match(/(\d{1,2})\s*(июня|июля|мая|апреля|марта|февраля|января|августа|сентября|октября|ноября|декабря)/i);
-    if (timeMatch && dateMatch) {
-      const taken = await isSlotTaken(dateMatch[0], timeMatch[0], business.igId);
+    const isoDate = extractIsoDate(conv.messages);
+    if (timeMatch && isoDate) {
+      const taken = await isSlotTaken(isoDate, timeMatch[0], business.igId);
       if (taken) {
         conv.completed = false;
-        await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} ${dateMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+        await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
         return;
       }
 
@@ -555,7 +562,7 @@ if (db) {
   }
 }
       
-      await bookSlot(dateMatch[0], timeMatch[0], business.igId);
+      await bookSlot(isoDate, timeMatch[0], business.igId);
       // Сохраняем заявку для напоминания
 const nameMatch = aiReply.match(/Имя[:\s]+([^\n]+)/i);
 const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
@@ -564,7 +571,7 @@ const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
   senderId,
   businessId: business.igId,
   accessToken: business.accessToken,
-  date: dateMatch[0],
+  date: isoDate,
   time: timeMatch[0],
   name: nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано",
   service: serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана",
@@ -574,7 +581,7 @@ const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
   reminded: false
 });
 }
-      console.log(`Слот забронирован: ${dateMatch[0]} ${timeMatch[0]}`);
+      console.log(`Слот забронирован: ${isoDate} ${timeMatch[0]}`);
     }
   }
 
@@ -831,6 +838,11 @@ if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) 
   const now = new Date();
   const monthStr = now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', month: 'long' });
   const dateKey = `${day} ${monthStr}`;
+  let menuMonth = now.getMonth();
+  let menuYear = now.getFullYear();
+  if (day < now.getDate()) menuMonth += 1; // запрошенный день уже прошёл в этом месяце — значит имели в виду следующий
+  if (menuMonth > 11) { menuMonth = 0; menuYear += 1; }
+  const targetIso = `${menuYear}-${String(menuMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
   const times = [];
   for (let h = 10; h <= 18; h++) {
@@ -846,7 +858,7 @@ const businessForMenu = Object.values(businesses).find(b =>
 
 const appointments = db ? await db.collection("appointments").find({
   businessId: businessForMenu?.igId,
-  date: { $regex: String(day) },
+  date: targetIso,
   status: { $ne: "cancelled" }
 }).toArray() : [];
 
@@ -854,8 +866,7 @@ const appointments = db ? await db.collection("appointments").find({
   for (const time of times) {
     const apt = appointments.find(a => a.time === time);
     if (apt) {
-      const link = apt.telegramMessageId ? `https://t.me/c/${String(chatId).replace("-100", "")}/${apt.telegramMessageId}` : null;
-menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service || "не указана"})${link ? ` [→](${link})` : ""}\n`;
+      menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service || "не указана"})\n`;
     } else {
       menu += `✅ ${time} — свободно\n`;
     }
@@ -864,7 +875,7 @@ menu += `📌 ${time} — ${apt.name || "не указано"} (${apt.service ||
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: menu, parse_mode: "Markdown" })
+    body: JSON.stringify({ chat_id: chatId, text: menu })
   });
   return;
     }
@@ -913,17 +924,12 @@ async function sendReminders() {
 }));
 if (currentHour !== 8) return;
   
-  const now = new Date();
   const tomorrow = new Date(Date.now() + 86400000);
-  const tomorrowStr = tomorrow.toLocaleString('pl-PL', { 
-    timeZone: 'Europe/Warsaw', 
-    day: 'numeric', 
-    month: 'long' 
-  });
+  const tomorrowIso = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
   
   const appointments = await db.collection("appointments").find({ 
     reminded: false,
-    date: { $regex: tomorrowStr.split(' ')[0] }
+    date: tomorrowIso
   }).toArray();
   
   for (const apt of appointments) {
@@ -948,12 +954,11 @@ if (currentHour !== 8) return;
 setInterval(sendReminders, 60 * 60 * 1000);
 // И сразу при старте
 
-// Очищаем старые слоты при старте
+// Очищаем только прошедшие слоты при старте (будущие записи не трогаем!)
 if (db) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  db.collection('slots').deleteMany({}).then(() => {
-    console.log('Старые слоты очищены');
+  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+  db.collection('slots').deleteMany({ date: { $lt: todayIso } }).then(() => {
+    console.log('Прошедшие слоты очищены');
   });
 }  
 
