@@ -152,11 +152,43 @@ async function freeSlot(date, time, businessId) {
   await db.collection("slots").deleteOne({ businessId, date, time });
 }
 
-function getConversation(key) {
+async function getConversation(key) {
   if (!conversations[key]) {
-    conversations[key] = { messages: [], humanMode: false };
+    if (db) {
+      const doc = await db.collection("conversations").findOne({ key });
+      if (doc) {
+        conversations[key] = {
+          messages: doc.messages || [],
+          humanMode: doc.humanMode || false,
+          awaitingTimeConfirm: doc.awaitingTimeConfirm || null,
+          completed: doc.completed || false,
+          telegramMessageId: doc.telegramMessageId || null
+        };
+      }
+    }
+    if (!conversations[key]) {
+      conversations[key] = { messages: [], humanMode: false, awaitingTimeConfirm: null, completed: false, telegramMessageId: null };
+    }
   }
   return conversations[key];
+}
+
+async function persistConv(key) {
+  if (!db || !conversations[key]) return;
+  const c = conversations[key];
+  await db.collection("conversations").updateOne(
+    { key },
+    { $set: {
+        key,
+        messages: c.messages,
+        humanMode: !!c.humanMode,
+        awaitingTimeConfirm: c.awaitingTimeConfirm || null,
+        completed: !!c.completed,
+        telegramMessageId: c.telegramMessageId || null,
+        updatedAt: new Date()
+    }},
+    { upsert: true }
+  );
 }
 
 // ─── Системный промпт ─────────────────────────────────────────────────────────
@@ -415,7 +447,8 @@ function detectLanguage(text) {
   return 'английский';
 }
 async function handleMessage(senderId, text, business) {
-  const conv = getConversation(`${business.igId}_${senderId}`);
+  const convKey = `${business.igId}_${senderId}`;
+  const conv = await getConversation(convKey);
 
   // Проверяем ждёт ли подтверждения времени
   if (conv.awaitingTimeConfirm && /^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
@@ -457,6 +490,7 @@ if (isoDate431) await bookSlot(isoDate431, confirmedTime, business.igId);
   });
 }
 conv.completed = true;
+    await persistConv(convKey);
     await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
     const pendingDocConfirm = db ? await db.collection("pending").findOne({ senderId }) : null;
 const replyToIdConfirm = pendingDocConfirm?.telegramMessageId || null;
@@ -542,6 +576,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
       const taken = await isSlotTaken(isoDate, timeMatch[0], business.igId);
       if (taken) {
         conv.completed = false;
+        await persistConv(convKey);
         await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
         return;
       }
@@ -600,12 +635,14 @@ if (pendingTime) {
 } else {
   await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
 }
+  await persistConv(convKey);
   return;
 }
 
   if (aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
     const cleanReply = aiReply.replace("[НУЖЕН_ЧЕЛОВЕК]", "").trim();
     conv.humanMode = true;
+    await persistConv(convKey);
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
     await notifyDirector("🙋 Клиент хочет поговорить с человеком!", senderId, conv, business);
     return;
@@ -621,9 +658,11 @@ if (pendingTime) {
     );
   }
   conv.completed = false;
+  await persistConv(convKey);
   return;
 }
 
+  await persistConv(convKey);
   await sendInstagramMessage(senderId, aiReply.replace(/\[ДАТА:\d{4}-\d{2}-\d{2}\]/g, "").trim(), business.accessToken);
 }
 
@@ -707,7 +746,8 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
     const data = await res.json();
     if (data.ok && data.result?.message_id) {
   conv.telegramMessageId = data.result.message_id;
-  // Сохраняем в MongoDB
+  const convKey = `${business.igId}_${senderId}`;
+  await persistConv(convKey);
   if (db) {
     await db.collection("pending").updateOne(
       { senderId },
@@ -764,9 +804,11 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
   await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
   
   // Сбрасываем разговор чтобы следующее "да" было правильно обработано
-  if (conversations[convKey]) {
-    conversations[convKey].awaitingTimeConfirm = time;
+  if (!conversations[convKey]) {
+    conversations[convKey] = { messages: [], humanMode: false, awaitingTimeConfirm: null, completed: false, telegramMessageId: null };
   }
+  conversations[convKey].awaitingTimeConfirm = time;
+  await persistConv(convKey);
 }
 
     if (data.startsWith("slots_")) {
@@ -959,6 +1001,11 @@ if (db) {
   const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
   db.collection('slots').deleteMany({ date: { $lt: todayIso } }).then(() => {
     console.log('Прошедшие слоты очищены');
+  });
+  // Чистим диалоги старше 14 дней
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  db.collection('conversations').deleteMany({ updatedAt: { $lt: cutoff } }).then(() => {
+    console.log('Старые диалоги очищены');
   });
 }  
 
