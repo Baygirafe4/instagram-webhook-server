@@ -512,6 +512,36 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
     return;
   }
 
+  // Клиент уже записан — обрабатываем повторное обращение
+  if (conv.completed) {
+    const wantsNewBooking = /снова|ещё|еще|записаться|хочу|другой|again|book|znowu|jeszcze|chc[ęe]|nowy/i.test(text.toLowerCase());
+    const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу/i.test(text.toLowerCase());
+
+    if (wantsCancel) {
+      // Сбрасываем completed чтобы ИИ обработал отмену через [ОТМЕНА_ЗАПИСИ]
+      conv.completed = false;
+      await persistConv(convKey);
+      // Fall through to AI
+    } else if (wantsNewBooking) {
+      // Сбрасываем диалог полностью для новой записи
+      conv.messages = [];
+      conv.completed = false;
+      conv.humanMode = false;
+      conv.awaitingTimeConfirm = null;
+      await persistConv(convKey);
+      await sendInstagramMessage(senderId, "Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?", business.accessToken);
+      return;
+    } else {
+      // Клиент написал что-то другое — напоминаем что уже записан
+      await sendInstagramMessage(
+        senderId,
+        "Вы уже записаны к нам! 😊\n\nЕсли хотите записаться ещё раз — напишите «хочу записаться»\nЕсли хотите отменить запись — напишите «хочу отменить»",
+        business.accessToken
+      );
+      return;
+    }
+  }
+
   // Проверяем занятость если клиент называет время
 const userTimeMatch = text.match(/(\d{1,2})[:.]\s*(\d{2})/);
 if (userTimeMatch && !conv.awaitingTimeConfirm) {
@@ -659,12 +689,37 @@ if (pendingTime) {
   if (aiReply.includes("[ОТМЕНА_ЗАПИСИ]")) {
   const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
   await sendInstagramMessage(senderId, cleanReply, business.accessToken);
+
+  // Находим запись чтобы показать барберу детали отмены
+  const cancelledApt = db ? await db.collection("appointments").findOne(
+    { senderId, status: { $ne: "cancelled" } },
+    { sort: { createdAt: -1 } }
+  ) : null;
+
   if (db) {
     await db.collection("appointments").updateMany(
-      { senderId, reminded: false },
-      { $set: { cancelled: true } }
+      { senderId, status: { $ne: "cancelled" } },
+      { $set: { status: "cancelled" } }
     );
+    if (cancelledApt) {
+      await db.collection("slots").deleteOne({
+        businessId: business.igId, date: cancelledApt.date, time: cancelledApt.time
+      });
+    }
   }
+
+  // Уведомляем барбера об отмене
+  const cancelName = cancelledApt?.name || "Клиент";
+  const cancelTime = cancelledApt ? `${cancelledApt.date} в ${cancelledApt.time}` : "неизвестное время";
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: `❌ Отмена записи!\n\n👤 Имя: ${cancelName}\n🕐 Время: ${cancelTime}\n\nКлиент отменил запись.`
+    })
+  });
+
   conv.completed = false;
   await persistConv(convKey);
   return;
