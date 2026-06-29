@@ -514,31 +514,55 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
 
   // Клиент уже записан — обрабатываем повторное обращение
   if (conv.completed) {
-    const wantsNewBooking = /снова|ещё|еще|записаться|хочу|другой|again|book|znowu|jeszcze|chc[ęe]|nowy/i.test(text.toLowerCase());
-    const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу/i.test(text.toLowerCase());
-
-    if (wantsCancel) {
-      // Сбрасываем completed чтобы ИИ обработал отмену через [ОТМЕНА_ЗАПИСИ]
-      conv.completed = false;
-      await persistConv(convKey);
-      // Fall through to AI
-    } else if (wantsNewBooking) {
-      // Сбрасываем диалог полностью для новой записи
+    // Если дата записи уже прошла — сбрасываем автоматически
+    const lastApt = db ? await db.collection("appointments").findOne(
+      { senderId, businessId: business.igId, status: { $ne: "cancelled" } },
+      { sort: { createdAt: -1 } }
+    ) : null;
+    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+    if (!lastApt || lastApt.date < todayIso) {
       conv.messages = [];
       conv.completed = false;
       conv.humanMode = false;
       conv.awaitingTimeConfirm = null;
       await persistConv(convKey);
-      await sendInstagramMessage(senderId, "Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?", business.accessToken);
-      return;
+      // Продолжаем как обычно — клиент может записаться снова
     } else {
-      // Клиент написал что-то другое — напоминаем что уже записан
-      await sendInstagramMessage(
-        senderId,
-        "Вы уже записаны к нам! 😊\n\nЕсли хотите записаться ещё раз — напишите «хочу записаться»\nЕсли хотите отменить запись — напишите «хочу отменить»",
-        business.accessToken
-      );
-      return;
+      // Запись ещё впереди — разбираем что написал клиент
+      const lowerText = text.toLowerCase();
+      const isAccidental = /случайн|ошибся|ошиблась|не туда|wrong chat|pomyłka|przepraszam|nie to/i.test(lowerText);
+      const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу|отказ/i.test(lowerText);
+      const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|другой|again|book|znowu|jeszcze raz|chc[ęe]|^да$|^yes$|^tak$/i.test(lowerText);
+
+      if (isAccidental) {
+        // Случайное сообщение — прощаемся с учётом времени
+        const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
+        const greeting = hour < 12 ? 'Доброго утра' : hour < 18 ? 'Приятного дня' : 'Приятного вечера';
+        await sendInstagramMessage(senderId, `Ничего страшного! ${greeting}! 😊 Ждём вас на записи! 💈`, business.accessToken);
+        return;
+      } else if (wantsCancel) {
+        conv.completed = false;
+        await persistConv(convKey);
+        // Продолжаем — ИИ обработает отмену через [ОТМЕНА_ЗАПИСИ]
+      } else if (wantsNewBooking) {
+        // Сбрасываем диалог и начинаем как в первый раз
+        const botGreeting = "Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?";
+        conv.messages = [{ role: "assistant", content: botGreeting }];
+        conv.completed = false;
+        conv.humanMode = false;
+        conv.awaitingTimeConfirm = null;
+        await persistConv(convKey);
+        await sendInstagramMessage(senderId, botGreeting, business.accessToken);
+        return;
+      } else {
+        // Непонятное сообщение — напоминаем что записан
+        await sendInstagramMessage(
+          senderId,
+          "Вы уже записаны к нам! 😊\n\nЕсли хотите записаться ещё раз — напишите «хочу записаться»\nЕсли хотите отменить запись — напишите «хочу отменить»\nЕсли написали случайно — напишите «случайно»",
+          business.accessToken
+        );
+        return;
+      }
     }
   }
 
