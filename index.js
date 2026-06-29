@@ -499,11 +499,12 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
     await deletePendingReschedule(senderId);
     return;
     } else {
-      // Клиент отказался от предложенного времени — сбрасываем флаги и удаляем pending
+      // Клиент отказался от предложенного времени — сбрасываем флаги
+      // НЕ удаляем pendingReschedule — он нужен чтобы знать что это перенос а не новая запись
       conv.awaitingTimeConfirm = null;
       conv.completed = false;
+      conv.isRescheduling = true; // флаг что клиент сам предлагает время после отказа
       await persistConv(convKey);
-      await deletePendingReschedule(senderId);
     }
   }
 
@@ -562,10 +563,12 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
         await sendInstagramMessage(senderId, botGreeting, business.accessToken);
         return;
       } else {
-        // Непонятное сообщение — напоминаем что записан
+        // Непонятное сообщение — напоминаем что записан, но естественно
+        const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
+        const greeting = hour < 12 ? 'утра' : hour < 18 ? 'дня' : 'вечера';
         await sendInstagramMessage(
           senderId,
-          "Вы уже записаны к нам! 😊\n\nЕсли хотите записаться ещё раз — напишите «хочу записаться»\nЕсли хотите отменить запись — напишите «хочу отменить»\nЕсли написали случайно — напишите «случайно»",
+          `Привет! Вы уже записаны к нам 😊 Хотите записаться ещё раз или что-то изменить?`,
           business.accessToken
         );
         return;
@@ -695,12 +698,18 @@ const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
 
   // Отправляем барберу в Telegram
   const pendingTime = await loadPendingReschedule(senderId);
-if (pendingTime) {
+if (pendingTime && !conv.isRescheduling) {
+  // Клиент согласился с временем барбера
   const pendingDoc = db ? await db.collection("pending").findOne({ senderId }) : null;
   const replyToId = pendingDoc?.telegramMessageId || null;
   console.log(`replyToId для ${senderId}:`, replyToId);
   await deletePendingReschedule(senderId);
   await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime, replyToId);
+} else if (conv.isRescheduling || pendingTime) {
+  // Клиент отказался от времени барбера и предложил своё
+  conv.isRescheduling = false;
+  await deletePendingReschedule(senderId);
+  await notifyDirector(`✏️ Клиент предложил своё время`, senderId, conv, business);
 } else if (conv.isRebooking && conv.prevApt) {
   // Клиент перезаписался — показываем старую и новую запись
   const prevInfo = `${conv.prevApt.date} в ${conv.prevApt.time}`;
