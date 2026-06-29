@@ -545,12 +545,19 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
         await persistConv(convKey);
         // Продолжаем — ИИ обработает отмену через [ОТМЕНА_ЗАПИСИ]
       } else if (wantsNewBooking) {
+        // Сохраняем старую запись чтобы потом показать барберу что это перезапись
+        const oldAptForRebook = db ? await db.collection("appointments").findOne(
+          { senderId, businessId: business.igId, status: { $ne: "cancelled" } },
+          { sort: { createdAt: -1 } }
+        ) : null;
         // Сбрасываем диалог и начинаем как в первый раз
         const botGreeting = "Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?";
         conv.messages = [{ role: "assistant", content: botGreeting }];
         conv.completed = false;
         conv.humanMode = false;
         conv.awaitingTimeConfirm = null;
+        conv.prevApt = oldAptForRebook ? { date: oldAptForRebook.date, time: oldAptForRebook.time } : null;
+        conv.isRebooking = true;
         await persistConv(convKey);
         await sendInstagramMessage(senderId, botGreeting, business.accessToken);
         return;
@@ -694,6 +701,12 @@ if (pendingTime) {
   console.log(`replyToId для ${senderId}:`, replyToId);
   await deletePendingReschedule(senderId);
   await notifyDirector(`✏️ Клиент подтвердил новое время: ${pendingTime}`, senderId, conv, business, pendingTime, replyToId);
+} else if (conv.isRebooking && conv.prevApt) {
+  // Клиент перезаписался — показываем старую и новую запись
+  const prevInfo = `${conv.prevApt.date} в ${conv.prevApt.time}`;
+  conv.isRebooking = false;
+  conv.prevApt = null;
+  await notifyDirector(`🔄 Клиент перезаписался!\n\n❌ Старая запись: ${prevInfo} — отменена`, senderId, conv, business);
 } else {
   await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
 }
