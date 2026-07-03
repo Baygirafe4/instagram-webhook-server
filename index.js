@@ -465,7 +465,7 @@ async function handleMessage(senderId, text, business) {
 
   // Проверяем ждёт ли подтверждения времени
   if (conv.awaitingTimeConfirm) {
-    if (/^(да|yes|tak|ok|окей|подходит|годится|супер|отлично|хорошо)/i.test(text)) {
+    if (/^(да|yes|tak|ok|okej|okay|окей|подходит|годится|супер|отлично|хорошо|pasuje|zgoda|dobrze|super|świetnie|sure|good|fine)/i.test(text)) {
     const confirmedTime = conv.awaitingTimeConfirm;
     conv.awaitingTimeConfirm = null;
     // Освобождаем старый слот, бронируем новый
@@ -487,8 +487,8 @@ if (db) {
 const isoDate431 = extractIsoDate(conv.messages);
 if (isoDate431) await bookSlot(isoDate431, confirmedTime, business.igId);
     if (isoDate431 && db) {
-  const nameM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Имя[:\s]+([^\n]+)/i);
-  const serviceM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/Услуга[:\s]+([^\n]+)/i);
+  const nameM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/(?:Имя|Imię|Name)[:\s]+([^\n]+)/i);
+  const serviceM = conv.messages.filter(m => m.role === "assistant").map(m => m.content).join(" ").match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]+)/i);
   await db.collection("appointments").insertOne({
     senderId,
     businessId: business.igId,
@@ -684,8 +684,8 @@ if (db) {
       
       await bookSlot(isoDate, timeMatch[0], business.igId);
       // Сохраняем заявку для напоминания
-const nameMatch = aiReply.match(/Имя[:\s]+([^\n]+)/i);
-const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
+const nameMatch = aiReply.match(/(?:Имя|Imię|Name)[:\s]+([^\n]+)/i);
+const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]+)/i);
       if (db) {
   await db.collection("appointments").insertOne({
   senderId,
@@ -693,8 +693,8 @@ const serviceMatch = aiReply.match(/Услуга[:\s]+([^\n]+)/i);
   accessToken: business.accessToken,
   date: isoDate,
   time: timeMatch[0],
-  name: nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано",
-  service: serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана",
+  name: nameMatch ? nameMatch[1]?.trim() : "не указано",
+  service: serviceMatch ? serviceMatch[1]?.trim() : "не указана",
   telegramMessageId: conv.telegramMessageId || null,
   status: "confirmed",
   createdAt: new Date(),
@@ -836,16 +836,24 @@ const clientInfo = lastMessages
 const msgs = conv.messages.filter(m => m.role === "user").map(m => m.content);
 const lastBot = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content || "";
 
-const serviceMatch = lastBot.match(/Услуга[:\s]+([^\n]+)/i) || lastBot.match(/Стрижка[^\n]*/i);
-const timeMatch = lastBot.match(/Время[:\s]+([^\n]+)/i) || lastBot.match(/\d{1,2}\s*(июня|июля|мая)[^\n]*/i);
+// Многоязычное извлечение (русский / польский / английский)
+const serviceMatch = lastBot.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]+)/i)
+  || lastBot.match(/(?:Стрижк|Strzyż|Combo|Buzz|Express)[^\n]*/i);
+const timeMatch = lastBot.match(/(?:Время|Data i godzina|Godzina|Date and time|Time|Data)[:\s]+([^\n]+)/i)
+  || lastBot.match(/\d{1,2}:\d{2}/);
 const phoneMatch = msgs.join(" ").match(/\+?[\d\s\-]{9,}/);
 
-const service = serviceMatch ? serviceMatch[0].replace(/Услуга[:\s]*/i, "").trim() : "не указана";
-const time = overrideTime || (timeMatch ? timeMatch[0].replace(/Время[:\s]*/i, "").trim() : "не указано");
+const service = serviceMatch
+  ? (serviceMatch[1] ? serviceMatch[1].trim() : serviceMatch[0].replace(/(?:Услуга|Usługa|Service)[:\s]*/i, "").trim())
+  : "не указана";
+const time = overrideTime
+  ? overrideTime
+  : (timeMatch ? (timeMatch[1] ? timeMatch[1].trim() : timeMatch[0].replace(/(?:Время|Data i godzina|Godzina|Date and time|Time|Data)[:\s]*/i, "").trim()) : "не указано");
 const phone = phoneMatch ? phoneMatch[0].trim() : "не указан";
 
-const nameMatch = lastBot.match(/Имя[:\s]+([^\n]+)/i) || msgs.join(" ").match(/меня зовут\s+(\w+)/i);
-const name = nameMatch ? nameMatch[1]?.trim() || nameMatch[0].replace(/Имя[:\s]*/i, "").trim() : "не указано";
+const nameMatch = lastBot.match(/(?:Имя|Imię|Name)[:\s]+([^\n]+)/i)
+  || msgs.join(" ").match(/(?:меня зовут|nazywam się|my name is|jestem)\s+(\w+)/i);
+const name = nameMatch ? (nameMatch[1] ? nameMatch[1].trim() : nameMatch[0].replace(/(?:Имя|Imię|Name)[:\s]*/i, "").trim()) : "не указано";
 
 const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${service}\n🕐 Время: ${time}\n📱 Телефон: ${phone}`;
   const keyboard = {
