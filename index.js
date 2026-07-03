@@ -459,6 +459,74 @@ function detectLanguage(text) {
   if (polishChars.test(text) || polishWords.test(text)) return 'польский';
   return 'английский';
 }
+
+// Словарь системных фраз на 3 языках. {t} — подстановка времени/значения
+const TRANSLATIONS = {
+  proposeTime: {
+    'русский': 'Барбер предлагает вам время {t} — подходит? 😊',
+    'польский': 'Barber proponuje godzinę {t} — pasuje? 😊',
+    'английский': 'The barber suggests {t} — does that work for you? 😊'
+  },
+  proposeOtherTime: {
+    'русский': 'Барбер предлагает другое время: {t} — подходит? 😊',
+    'польский': 'Barber proponuje inną godzinę: {t} — pasuje? 😊',
+    'английский': 'The barber suggests a different time: {t} — does that work? 😊'
+  },
+  confirmed: {
+    'русский': '✅ Отлично! Ваша запись подтверждена на {t}. Ждём вас! 💈',
+    'польский': '✅ Świetnie! Twoja rezerwacja na {t} jest potwierdzona. Czekamy! 💈',
+    'английский': '✅ Great! Your appointment at {t} is confirmed. See you! 💈'
+  },
+  confirmedSimple: {
+    'русский': '✅ Ваша запись подтверждена! Ждём вас 💈',
+    'польский': '✅ Twoja rezerwacja jest potwierdzona! Czekamy 💈',
+    'английский': '✅ Your appointment is confirmed! See you 💈'
+  },
+  barberBusy: {
+    'русский': 'К сожалению барбер занят в это время 😔 На какое другое время хотите записаться?',
+    'польский': 'Niestety barber jest zajęty o tej porze 😔 Na jaką inną godzinę chcesz się umówić?',
+    'английский': 'Unfortunately the barber is busy at that time 😔 What other time would you like?'
+  },
+  barberWillPick: {
+    'русский': 'Это время занято 😔 Барбер подберёт другое время — ожидайте!',
+    'польский': 'Ta godzina jest zajęta 😔 Barber dobierze inną — proszę czekać!',
+    'английский': 'That time is taken 😔 The barber will pick another — please wait!'
+  },
+  slotTaken: {
+    'русский': 'К сожалению {t} уже занято 😔 Выберите другое время!',
+    'польский': 'Niestety {t} jest już zajęte 😔 Wybierz inną godzinę!',
+    'английский': 'Unfortunately {t} is already taken 😔 Please choose another time!'
+  },
+  error: {
+    'русский': 'Извините, произошла ошибка. Попробуйте позже.',
+    'польский': 'Przepraszam, wystąpił błąd. Spróbuj później.',
+    'английский': 'Sorry, an error occurred. Please try again later.'
+  },
+  alreadyBooked: {
+    'русский': 'Привет! Вы уже записаны к нам 😊 Хотите записаться ещё раз или что-то изменить?',
+    'польский': 'Cześć! Jesteś już zapisany 😊 Chcesz umówić się jeszcze raz lub coś zmienić?',
+    'английский': "Hi! You're already booked with us 😊 Would you like to book again or change something?"
+  },
+  bookAgain: {
+    'русский': 'Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?',
+    'польский': 'Świetnie, zapiszemy Cię jeszcze raz! 😊 Jaką usługę wybierasz?',
+    'английский': 'Great, let\'s book you again! 😊 Which service would you like?'
+  },
+  accidental: {
+    'русский': 'Ничего страшного! {t}! 😊 Ждём вас на записи! 💈',
+    'польский': 'Nic się nie stało! {t}! 😊 Czekamy na Ciebie! 💈',
+    'английский': 'No worries! {t}! 😊 See you at your appointment! 💈'
+  }
+};
+
+// Возвращает фразу на языке клиента (по последнему его сообщению)
+function t(key, conv, value = '') {
+  const lastUserMsg = [...conv.messages].reverse().find(m => m.role === "user")?.content || '';
+  const lang = detectLanguage(lastUserMsg);
+  const phrase = (TRANSLATIONS[key] && TRANSLATIONS[key][lang]) || (TRANSLATIONS[key] && TRANSLATIONS[key]['русский']) || '';
+  return phrase.replace('{t}', value);
+}
+
 async function handleMessage(senderId, text, business) {
   const convKey = `${business.igId}_${senderId}`;
   const conv = await getConversation(convKey);
@@ -505,7 +573,7 @@ if (isoDate431) await bookSlot(isoDate431, confirmedTime, business.igId);
 }
 conv.completed = true;
     await persistConv(convKey);
-    await sendInstagramMessage(senderId, `✅ Отлично! Ваша запись подтверждена на ${confirmedTime}. Ждём вас! 💈`, business.accessToken);
+    await sendInstagramMessage(senderId, t('confirmed', conv, confirmedTime), business.accessToken);
     const pendingDocConfirm = db ? await db.collection("pending").findOne({ senderId }) : null;
 const replyToIdConfirm = pendingDocConfirm?.telegramMessageId || null;
 await notifyDirector(`✏️ Клиент подтвердил новое время: ${confirmedTime}`, senderId, conv, business, confirmedTime, replyToIdConfirm);
@@ -549,10 +617,16 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
       const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|другой|again|book|znowu|jeszcze raz|chc[ęe]|^да$|^yes$|^tak$/i.test(lowerText);
 
       if (isAccidental) {
-        // Случайное сообщение — прощаемся с учётом времени
+        // Случайное сообщение — прощаемся с учётом времени и языка
         const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
-        const greeting = hour < 12 ? 'Доброго утра' : hour < 18 ? 'Приятного дня' : 'Приятного вечера';
-        await sendInstagramMessage(senderId, `Ничего страшного! ${greeting}! 😊 Ждём вас на записи! 💈`, business.accessToken);
+        const lastUserMsg = [...conv.messages].reverse().find(m => m.role === "user")?.content || '';
+        const lang = detectLanguage(lastUserMsg);
+        const greetings = {
+          'русский': hour < 12 ? 'Доброго утра' : hour < 18 ? 'Приятного дня' : 'Приятного вечера',
+          'польский': hour < 12 ? 'Miłego poranka' : hour < 18 ? 'Miłego dnia' : 'Miłego wieczoru',
+          'английский': hour < 12 ? 'Have a good morning' : hour < 18 ? 'Have a nice day' : 'Have a nice evening'
+        };
+        await sendInstagramMessage(senderId, t('accidental', conv, greetings[lang]), business.accessToken);
         return;
       } else if (wantsCancel) {
         conv.completed = false;
@@ -565,7 +639,7 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
           { sort: { createdAt: -1 } }
         ) : null;
         // Сбрасываем диалог и начинаем как в первый раз
-        const botGreeting = "Отлично, запишем вас ещё раз! 😊 Какую услугу хотите?";
+        const botGreeting = t('bookAgain', conv);
         conv.messages = [{ role: "assistant", content: botGreeting }];
         conv.completed = false;
         conv.humanMode = false;
@@ -581,7 +655,7 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
         const greeting = hour < 12 ? 'утра' : hour < 18 ? 'дня' : 'вечера';
         await sendInstagramMessage(
           senderId,
-          `Привет! Вы уже записаны к нам 😊 Хотите записаться ещё раз или что-то изменить?`,
+          t('alreadyBooked', conv),
           business.accessToken
         );
         return;
@@ -628,7 +702,7 @@ if (userTimeMatch && !conv.awaitingTimeConfirm) {
   if (checkDate) {
     const taken = await isSlotTaken(checkDate, userTime, business.igId);
     if (taken) {
-      await sendInstagramMessage(senderId, `К сожалению ${userTime} ${checkDate} уже занято 😔 Выберите другое время!`, business.accessToken);
+      await sendInstagramMessage(senderId, t('slotTaken', conv, `${userTime} ${checkDate}`), business.accessToken);
       return;
     }
   }
@@ -641,7 +715,7 @@ if (userTimeMatch && !conv.awaitingTimeConfirm) {
 const aiReply = await askClaude(conv.messages, business, lang);
 
   if (!aiReply) {
-    await sendInstagramMessage(senderId, "Извините, произошла ошибка. Попробуйте позже.", business.accessToken);
+    await sendInstagramMessage(senderId, t('error', conv), business.accessToken);
     return;
   }
 
@@ -662,7 +736,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
       if (taken) {
         conv.completed = false;
         await persistConv(convKey);
-        await sendInstagramMessage(senderId, `К сожалению ${timeMatch[0]} уже занято 😔 Выберите другое время!`, business.accessToken);
+        await sendInstagramMessage(senderId, t('slotTaken', conv, timeMatch[0]), business.accessToken);
         return;
       }
 
@@ -931,9 +1005,10 @@ app.post("/telegram/webhook", async (req, res) => {
   await answerCallback();
   await savePendingReschedule(senderId, time);
   const convKey = `${business.igId}_${senderId}`;
+const convForLang = await getConversation(convKey);
 const replyId = conversations[convKey]?.telegramMessageId;
 await sendTg(`✅ Время ${time} предложено клиенту. Ждём подтверждения.`, replyId);
-  await sendInstagramMessage(senderId, `Барбер предлагает вам время ${time} — подходит? 😊`, business.accessToken);
+  await sendInstagramMessage(senderId, t('proposeTime', convForLang, time), business.accessToken);
   
   // Сбрасываем разговор чтобы следующее "да" было правильно обработано
   if (!conversations[convKey]) {
@@ -978,14 +1053,16 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
       const senderId = data.replace("confirm_", "");
       await answerCallback();
       await sendTg("✅ Заявка подтверждена!");
-      await sendInstagramMessage(senderId, "✅ Ваша запись подтверждена! Ждём вас 💈", business.accessToken);
+      const convC = await getConversation(`${business.igId}_${senderId}`);
+      await sendInstagramMessage(senderId, t('confirmedSimple', convC), business.accessToken);
     }
 
     if (data.startsWith("cancel_")) {
   const senderId = data.replace("cancel_", "");
   await answerCallback();
   await sendTg("❌ Заявка отменена. Клиент уведомлён.");
-  await sendInstagramMessage(senderId, "К сожалению барбер занят в это время 😔 На какое другое время хотите записаться?", business.accessToken);
+  const convCancel = await getConversation(`${business.igId}_${senderId}`);
+  await sendInstagramMessage(senderId, t('barberBusy', convCancel), business.accessToken);
 }
 
     if (data.startsWith("reschedule_")) {
@@ -993,7 +1070,8 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
       await answerCallback();
       waitingForCustomTime[chatId] = senderId;
       await sendTg("✏️ Напишите удобное время (например: завтра в 14:30)");
-      await sendInstagramMessage(senderId, "Это время занято 😔 Барбер подберёт другое время — ожидайте!", business.accessToken);
+      const convR = await getConversation(`${business.igId}_${senderId}`);
+      await sendInstagramMessage(senderId, t('barberWillPick', convR), business.accessToken);
     }
   }
 
@@ -1068,7 +1146,8 @@ const appointments = db ? await db.collection("appointments").find({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: `✅ Время "${text}" отправлено клиенту!` })
       });
-      await sendInstagramMessage(senderId, `Барбер предлагает другое время: ${text} — подходит? 😊`, business.accessToken);
+      const convCustom = await getConversation(`${business.igId}_${senderId}`);
+      await sendInstagramMessage(senderId, t('proposeOtherTime', convCustom, text), business.accessToken);
     }
   }
 
