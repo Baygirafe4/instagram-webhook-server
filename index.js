@@ -261,7 +261,7 @@ ${business.description}
 ПРАВИЛА:
 1. Если клиент хочет записаться — задавай ТОЛЬКО ОДИН вопрос за раз. Сначала спроси имя. Когда ответит — сразу покажи ПОЛНЫЙ ПРАЙС-ЛИСТ УСЛУГ из информации о бизнесе (точь-в-точь, со всеми эмодзи и номерами) и попроси выбрать номер или название. Когда выберет услугу — спроси дату и время. Когда ответит — спроси телефон. Никогда не задавай несколько вопросов сразу. Никогда не переспрашивай и не уточняй то что клиент уже сказал.
 2. Правило о прошедшем времени: время может быть "уже прошло" ТОЛЬКО если клиент просит записаться на СЕГОДНЯ и названный час уже наступил. Если клиент говорит "завтра", "послезавтра" или называет любой будущий день — время НИКОГДА не может быть прошедшим, даже если этот час меньше текущего. Например если сейчас 15:46, а клиент просит "завтра на 10:00" — это нормально, 10:00 завтра ещё не наступило, принимай запись. НЕ говори что "завтра 10:00 уже прошло" — это ошибка.
-3. Когда клиент называет желаемое время — проверь занято ли оно. Если занято — предложи другое. КРИТИЧЕСКИ ВАЖНО: показывай резюме заявки и ставь [READY] ТОЛЬКО когда у тебя УЖЕ ЕСТЬ все 4 данных: имя (реальное имя клиента, а не пусто), услуга, дата+время, телефон. Если имени ещё нет — СНАЧАЛА спроси имя и ДОЖДИСЬ ответа, и только потом показывай резюме. НИКОГДА не пиши в резюме "(не указано)", "(nie podałeś)", "(not provided)" — если данных не хватает, значит рано показывать резюме, сначала спроси недостающее.
+3. Когда клиент называет желаемое время — проверь занято ли оно. Если занято — предложи другое. КРИТИЧЕСКИ ВАЖНО: показывай резюме заявки и ставь [READY] ТОЛЬКО когда у тебя УЖЕ ЕСТЬ все 4 данных: имя (реальное имя клиента, а не пусто), услуга, дата+время, телефон. Если имени ещё нет — СНАЧАЛА спроси имя и ДОЖДИСЬ ответа, и только потом показывай резюме. НИКОГДА не пиши в резюме "(не указано)", "(nie podałeś)", "(not provided)" — если данных не хватает, значит рано показывать резюме, сначала спроси недостающее. КОГДА показываешь резюме заявки — НЕ задавай вопросов типа "Всё верно?", "Wszystko się zgadza?", "Is everything correct?". Просто покажи резюме и поставь [READY] в конце. Резюме = финал, никаких вопросов после него.
 3a. ВАЖНО про занятость: считай время ЗАНЯТЫМ только если оно ЯВНО есть в списке "ЗАНЯТЫЕ СЛОТЫ" выше. Если этого времени НЕТ в списке занятых — оно СВОБОДНО, принимай запись. НИКОГДА не выдумывай что время занято если его нет в списке. Если список занятых пуст — значит всё время свободно.
 4. Если клиент пишет "хочу с человеком" или "администратор" — ответь что передаёшь и добавь: [HUMAN]
 5. Не придумывай данные которых нет выше.
@@ -455,6 +455,21 @@ app.post("/api/webhook", async (req, res) => {
 });
 
 // ─── Главная логика ───────────────────────────────────────────────────────────
+// Извлекает и нормализует время из текста в формат "H:MM" (понимает 14:00, 2 PM, 2pm, о 14)
+function parseTimeFromText(str) {
+  if (!str) return null;
+  const colon = str.match(/(\d{1,2})[:.](\d{2})/);
+  if (colon) return `${parseInt(colon[1])}:${colon[2].padStart(2, '0')}`;
+  const pm = str.match(/(\d{1,2})\s*(pm|am|рм|ам)/i);
+  if (pm) {
+    let h = parseInt(pm[1]);
+    if (/pm|рм/i.test(pm[2]) && h < 12) h += 12;
+    if (/am|ам/i.test(pm[2]) && h === 12) h = 0;
+    return `${h}:00`;
+  }
+  return null;
+}
+
 function extractIsoDate(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -789,14 +804,14 @@ const aiReply = await askClaude(conv.messages, business, lang);
   // Сначала проверяем занятость
   const lastBotMsg = conv.messages.filter(m => m.role === "assistant").slice(-1)[0];
   if (lastBotMsg) {
-    const timeMatch = lastBotMsg.content.match(/(\d{1,2}):(\d{2})/);
+    const normTime = parseTimeFromText(lastBotMsg.content);
     const isoDate = extractIsoDate(conv.messages);
-    if (timeMatch && isoDate) {
-      const taken = await isSlotTaken(isoDate, timeMatch[0], business.igId);
+    if (normTime && isoDate) {
+      const taken = await isSlotTaken(isoDate, normTime, business.igId);
       if (taken) {
         conv.completed = false;
         await persistConv(convKey);
-        await sendInstagramMessage(senderId, t('slotTaken', conv, timeMatch[0]), business.accessToken);
+        await sendInstagramMessage(senderId, t('slotTaken', conv, normTime), business.accessToken);
         return;
       }
 
@@ -816,7 +831,7 @@ if (db) {
   }
 }
       
-      await bookSlot(isoDate, timeMatch[0], business.igId);
+      await bookSlot(isoDate, normTime, business.igId);
       // Сохраняем заявку для напоминания
 const nameMatch = aiReply.match(/(?:Имя|Imię|Name)[:\s]+([^\n]+)/i);
 const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]+)/i);
@@ -826,7 +841,7 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
   businessId: business.igId,
   accessToken: business.accessToken,
   date: isoDate,
-  time: timeMatch[0],
+  time: normTime,
   name: nameMatch ? nameMatch[1]?.trim() : "не указано",
   service: serviceMatch ? serviceMatch[1]?.trim() : "не указана",
   telegramMessageId: conv.telegramMessageId || null,
@@ -835,7 +850,7 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
   reminded: false
 });
 }
-      console.log(`Слот забронирован: ${isoDate} ${timeMatch[0]}`);
+      console.log(`Слот забронирован: ${isoDate} ${normTime}`);
     }
   }
 
