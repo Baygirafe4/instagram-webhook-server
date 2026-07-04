@@ -138,6 +138,21 @@ async function deletePendingReschedule(senderId) {
   await db.collection("pending").deleteOne({ senderId });
 }
 
+// Находит senderId клиента по id сообщения-заявки в Telegram (когда барбер отвечает reply на заявку)
+async function findClientByMessageId(messageId, businessId) {
+  if (!db || !messageId) return null;
+  // Ищем сначала в pending (свежие заявки), потом в conversations
+  const pend = await db.collection("pending").findOne({ telegramMessageId: messageId });
+  if (pend?.senderId) return pend.senderId;
+  const conv = await db.collection("conversations").findOne({ telegramMessageId: messageId });
+  if (conv?.key) {
+    // key имеет вид "businessId_senderId" — вытаскиваем senderId
+    const prefix = `${businessId}_`;
+    if (conv.key.startsWith(prefix)) return conv.key.slice(prefix.length);
+  }
+  return null;
+}
+
 // ─── Внутренний календарь ─────────────────────────────────────────────────────
 // ─── Слоты в MongoDB ──────────────────────────────────────────────────────────
 async function isSlotTaken(date, time, businessId) {
@@ -246,7 +261,7 @@ ${business.description}
 ПРАВИЛА:
 1. Если клиент хочет записаться — задавай ТОЛЬКО ОДИН вопрос за раз. Сначала спроси имя. Когда ответит — сразу покажи ПОЛНЫЙ ПРАЙС-ЛИСТ УСЛУГ из информации о бизнесе (точь-в-точь, со всеми эмодзи и номерами) и попроси выбрать номер или название. Когда выберет услугу — спроси дату и время. Когда ответит — спроси телефон. Никогда не задавай несколько вопросов сразу. Никогда не переспрашивай и не уточняй то что клиент уже сказал.
 2. Не принимай запись на уже прошедшее время — вежливо предложи другое.
-3. Когда клиент называет желаемое время — проверь занято ли оно. Если занято — предложи другое. Когда собрал ВСЕ данные (имя, услугу, дату/время, телефон) — напиши резюме заявки БЕЗ вопросов о подтверждении, добавь ссылку: https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa и в конце на отдельной строке добавь: [READY]
+3. Когда клиент называет желаемое время — проверь занято ли оно. Если занято — предложи другое. КРИТИЧЕСКИ ВАЖНО: показывай резюме заявки и ставь [READY] ТОЛЬКО когда у тебя УЖЕ ЕСТЬ все 4 данных: имя (реальное имя клиента, а не пусто), услуга, дата+время, телефон. Если имени ещё нет — СНАЧАЛА спроси имя и ДОЖДИСЬ ответа, и только потом показывай резюме. НИКОГДА не пиши в резюме "(не указано)", "(nie podałeś)", "(not provided)" — если данных не хватает, значит рано показывать резюме, сначала спроси недостающее.
 4. Если клиент пишет "хочу с человеком" или "администратор" — ответь что передаёшь и добавь: [HUMAN]
 5. Не придумывай данные которых нет выше.
 6. Не отвечай на вопросы не связанные с бизнесом.
@@ -737,6 +752,22 @@ const aiReply = await askClaude(conv.messages, business, lang);
 
   if (/\[READY\]/i.test(aiReply) || /\[ЗАЯВКА.ГОТОВ/i.test(aiReply) || /\[ZAJAVKA|\[ZAYAVKA|\[GOTOWA|\[GOTOVA/i.test(aiReply)) {
   if (conv.completed) return;
+
+  // Защита: если имя не собрано (пустое или placeholder) — не создаём заявку, просим имя
+  const nameCheck = aiReply.match(/(?:Имя|Imię|Name)[:\s]+([^\n]+)/i);
+  const nameVal = nameCheck ? nameCheck[1].trim() : "";
+  const namePlaceholder = /не указан|nie poda|not provided|—|отсутству|brak|\(.*\)/i.test(nameVal) || nameVal.length < 2;
+  if (namePlaceholder) {
+    // Убираем метку и резюме, просим только имя на языке клиента
+    const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
+    let askLang = 'английский';
+    if (/[а-яёА-ЯЁ]/.test(joinedU)) askLang = 'русский';
+    else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|tak|nie|jutro|godzina)\b/i.test(joinedU)) askLang = 'польский';
+    const askName = { 'русский': 'Как вас зовут? 😊', 'польский': 'Jak masz na imię? 😊', 'английский': "What's your name? 😊" }[askLang];
+    await sendInstagramMessage(senderId, askName, business.accessToken);
+    return;
+  }
+
   conv.completed = true;
 
   // Сначала проверяем занятость
@@ -1145,20 +1176,32 @@ const appointments = db ? await db.collection("appointments").find({
   return;
     }
 
-    if (waitingForCustomTime[chatId]) {
-      const senderId = waitingForCustomTime[chatId];
+    // Определяем клиента: сначала по reply на заявку (надёжно), потом по waitingForCustomTime
+    const businessesForReply = loadBusinesses();
+    const businessReply = Object.values(businessesForReply).find(b =>
+      (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
+    ) || Object.values(businessesForReply)[0];
+    const replyToMsgId = body.message.reply_to_message?.message_id;
+    let customSenderId = null;
+    if (replyToMsgId) {
+      customSenderId = await findClientByMessageId(replyToMsgId, businessReply?.igId);
+    }
+    if (!customSenderId && waitingForCustomTime[chatId]) {
+      customSenderId = waitingForCustomTime[chatId];
+    }
+
+    if (customSenderId && !text.toLowerCase().startsWith("меню") && !text.startsWith("/")) {
+      const senderId = customSenderId;
       delete waitingForCustomTime[chatId];
 
-      const businesses = loadBusinesses();
-      const business = Object.values(businesses).find(b =>
-        (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId
-      ) || Object.values(businesses)[0];
+      const business = businessReply;
 
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: `✅ Время "${text}" отправлено клиенту!` })
       });
+      await savePendingReschedule(senderId, text);
       const convCustom = await getConversation(`${business.igId}_${senderId}`);
       await sendInstagramMessage(senderId, t('proposeOtherTime', convCustom, text), business.accessToken);
     }
