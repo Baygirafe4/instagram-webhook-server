@@ -824,7 +824,21 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
   }
 
   // Отправляем клиенту
-  const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
+  let cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
+  // Если ИИ забыл добавить ссылку на запись — добавляем её сами
+  const bookingLink = "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa";
+  if (!cleanReply.includes("booksy.com")) {
+    const linkLabels = {
+      'русский': '\n\n📅 Записаться также можно здесь: ',
+      'польский': '\n\n📅 Możesz też zarezerwować tutaj: ',
+      'английский': '\n\n📅 You can also book here: '
+    };
+    const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
+    let linkLang = 'английский';
+    if (/[а-яёА-ЯЁ]/.test(joinedU)) linkLang = 'русский';
+    else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|tak|nie|jutro|godzina)\b/i.test(joinedU)) linkLang = 'польский';
+    cleanReply += linkLabels[linkLang] + bookingLink;
+  }
   await sendInstagramMessage(senderId, cleanReply, business.accessToken);
 
   // Отправляем барберу в Telegram
