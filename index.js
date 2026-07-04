@@ -455,18 +455,21 @@ app.post("/api/webhook", async (req, res) => {
 });
 
 // ─── Главная логика ───────────────────────────────────────────────────────────
-// Извлекает и нормализует время из текста в формат "H:MM" (понимает 14:00, 2 PM, 2pm, о 14)
+// Извлекает и нормализует время из текста в формат "H:MM" (понимает 14:00, 2 PM, 2:00 PM, 2pm, о 14)
 function parseTimeFromText(str) {
   if (!str) return null;
+  // Ищем час, минуты (опц.) и am/pm (опц.) вместе, чтобы правильно обработать "2:00 PM"
+  const full = str.match(/(\d{1,2})(?::|\.)?(\d{2})?\s*(pm|am|рм|ам)/i);
+  if (full) {
+    let h = parseInt(full[1]);
+    const min = full[2] || '00';
+    if (/pm|рм/i.test(full[3]) && h < 12) h += 12;
+    if (/am|ам/i.test(full[3]) && h === 12) h = 0;
+    return `${h}:${min.padStart(2, '0')}`;
+  }
+  // Без am/pm — обычное время с двоеточием
   const colon = str.match(/(\d{1,2})[:.](\d{2})/);
   if (colon) return `${parseInt(colon[1])}:${colon[2].padStart(2, '0')}`;
-  const pm = str.match(/(\d{1,2})\s*(pm|am|рм|ам)/i);
-  if (pm) {
-    let h = parseInt(pm[1]);
-    if (/pm|рм/i.test(pm[2]) && h < 12) h += 12;
-    if (/am|ам/i.test(pm[2]) && h === 12) h = 0;
-    return `${h}:00`;
-  }
   return null;
 }
 
@@ -708,21 +711,14 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
   }
 
   // Проверяем занятость если клиент называет время
-// Распознаём время в разных форматах: 14:00, 14.00, 2 pm, 2pm, 14, "на 14"
-let userTime = null;
-const colonMatch = text.match(/(\d{1,2})[:.]\s*(\d{2})/);
-const pmMatch = text.match(/(\d{1,2})\s*(pm|am|рм|ам)/i);
-const bareHourMatch = text.match(/(?:на|о|at|for|godz\.?|в)\s*(\d{1,2})(?:\s|$|\.|,)/i) || text.match(/^(\d{1,2})$/);
-if (colonMatch) {
-  userTime = `${parseInt(colonMatch[1])}:${colonMatch[2].padStart(2, '0')}`;
-} else if (pmMatch) {
-  let h = parseInt(pmMatch[1]);
-  if (/pm|рм/i.test(pmMatch[2]) && h < 12) h += 12;
-  if (/am|ам/i.test(pmMatch[2]) && h === 12) h = 0;
-  userTime = `${h}:00`;
-} else if (bareHourMatch) {
-  const h = parseInt(bareHourMatch[1]);
-  if (h >= 8 && h <= 21) userTime = `${h}:00`; // только правдоподобные рабочие часы
+// Используем общий парсер (14:00, 2 pm, 2:00 PM) + запасной вариант для голого часа "на 11"
+let userTime = parseTimeFromText(text);
+if (!userTime) {
+  const bareHourMatch = text.match(/(?:на|о|at|for|godz\.?|в)\s*(\d{1,2})(?:\s|$|\.|,)/i) || text.match(/^(\d{1,2})$/);
+  if (bareHourMatch) {
+    const h = parseInt(bareHourMatch[1]);
+    if (h >= 8 && h <= 21) userTime = `${h}:00`; // только правдоподобные рабочие часы
+  }
 }
 
 if (userTime && !conv.awaitingTimeConfirm) {
