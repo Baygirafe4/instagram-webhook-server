@@ -640,7 +640,7 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
       const lowerText = text.toLowerCase();
       const isAccidental = /случайн|ошибся|ошиблась|не туда|wrong chat|pomyłka|przepraszam|nie to/i.test(lowerText);
       const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу|отказ/i.test(lowerText);
-      const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|другой|again|book|znowu|jeszcze raz|chc[ęe]|^да$|^yes$|^tak$/i.test(lowerText);
+      const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|запиши|another|again|book again|new booking|znowu|jeszcze raz|umówić|zapisać/i.test(lowerText);
 
       if (isAccidental) {
         // Случайное сообщение — прощаемся с учётом времени и языка
@@ -824,7 +824,7 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
   }
 
   // Отправляем клиенту
-  const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
+  const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
   await sendInstagramMessage(senderId, cleanReply, business.accessToken);
 
   // Отправляем барберу в Telegram
@@ -855,7 +855,7 @@ if (pendingTime && !conv.isRescheduling) {
 }
 
   if (/\[HUMAN\]/i.test(aiReply) || aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
-    const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
+    const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
     conv.humanMode = true;
     await persistConv(convKey);
     await sendInstagramMessage(senderId, cleanReply, business.accessToken);
@@ -864,7 +864,7 @@ if (pendingTime && !conv.isRescheduling) {
   }
 
   if (/\[CANCEL\]/i.test(aiReply) || aiReply.includes("[ОТМЕНА_ЗАПИСИ]")) {
-  const cleanReply = aiReply.replace(/\[.*?\]/g, "").trim();
+  const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
   await sendInstagramMessage(senderId, cleanReply, business.accessToken);
 
   // Находим запись чтобы показать барберу детали отмены
@@ -904,7 +904,7 @@ if (pendingTime && !conv.isRescheduling) {
 
   await persistConv(convKey);
   // Убираем ЛЮБЫЕ служебные теги в квадратных скобках (на любом языке) перед отправкой клиенту
-  const finalReply = aiReply.replace(/\[[^\]]*\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  const finalReply = aiReply.replace(/\[[^\]]*\]/g, "").replace(/\*+/g, "").replace(/\n{3,}/g, "\n\n").trim();
   await sendInstagramMessage(senderId, finalReply, business.accessToken);
 }
 
@@ -952,7 +952,8 @@ const clientInfo = lastMessages
   .join(", ");
 
 const msgs = conv.messages.filter(m => m.role === "user").map(m => m.content);
-const lastBot = conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content || "";
+// Убираем markdown-звёздочки которые иногда добавляет ИИ, чтобы они не попали в заявку
+const lastBot = (conv.messages.filter(m => m.role === "assistant").slice(-1)[0]?.content || "").replace(/\*+/g, "");
 
 // Многоязычное извлечение (русский / польский / английский)
 const serviceMatch = lastBot.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]+)/i)
@@ -1126,6 +1127,24 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
 
     // Команда /меню
 console.log(`TG message: chatId=${chatId}, text=${text}`);
+
+// Команда сброса для тестирования: /сброс или /reset — чистит все данные
+if ((text.toLowerCase().startsWith("/сброс") || text.toLowerCase().startsWith("/reset")) && !body.message.from?.is_bot) {
+  if (db) {
+    await db.collection("appointments").deleteMany({});
+    await db.collection("slots").deleteMany({});
+    await db.collection("conversations").deleteMany({});
+    await db.collection("pending").deleteMany({});
+  }
+  for (const k of Object.keys(conversations)) delete conversations[k];
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: "🧹 Всё очищено! Все записи, слоты и диалоги удалены. Можно тестировать с чистого листа." })
+  });
+  return res.sendStatus(200);
+}
+
 if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot && !menuSent[chatId]) {
   menuSent[chatId] = true;
   setTimeout(() => { delete menuSent[chatId]; }, 3000);
