@@ -1142,7 +1142,7 @@ if ((text.toLowerCase().startsWith("/сброс") || text.toLowerCase().startsWi
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text: "🧹 Всё очищено! Все записи, слоты и диалоги удалены. Можно тестировать с чистого листа." })
   });
-  return res.sendStatus(200);
+  return;
 }
 
 if ((text.startsWith("/меню") || text.toLowerCase().startsWith("меню")) && !body.message.from?.is_bot && !menuSent[chatId]) {
