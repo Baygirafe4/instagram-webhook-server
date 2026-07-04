@@ -519,10 +519,21 @@ const TRANSLATIONS = {
   }
 };
 
-// Возвращает фразу на языке клиента (по последнему его сообщению)
+// Возвращает фразу на языке клиента (по всем его сообщениям, а не только последнему)
 function t(key, conv, value = '') {
-  const lastUserMsg = [...conv.messages].reverse().find(m => m.role === "user")?.content || '';
-  const lang = detectLanguage(lastUserMsg);
+  const userMsgs = conv.messages.filter(m => m.role === "user").map(m => m.content);
+  // Определяем язык по каждому сообщению; берём преобладающий, но русский/польский имеют приоритет над английским
+  let lang = 'английский';
+  const joined = userMsgs.join(' ');
+  if (/[а-яёА-ЯЁ]/.test(joined)) {
+    lang = 'русский';
+  } else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joined) || /\b(czesc|hej|siema|chce|sie|tak|nie|dzien|dobry|witaj|umowic|strzyzenie|fryzjer|chcialbym|chcialabym|zapisac|prosze|godzina|jutro)\b/i.test(joined)) {
+    lang = 'польский';
+  } else {
+    // Если ни кириллицы ни польского — берём язык последнего осмысленного сообщения
+    const lastMeaningful = [...userMsgs].reverse().find(m => m.trim().length > 2 && !/^\+?[\d\s\-:]+$/.test(m.trim())) || joined;
+    lang = detectLanguage(lastMeaningful);
+  }
   const phrase = (TRANSLATIONS[key] && TRANSLATIONS[key][lang]) || (TRANSLATIONS[key] && TRANSLATIONS[key]['русский']) || '';
   return phrase.replace('{t}', value);
 }
@@ -619,8 +630,10 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
       if (isAccidental) {
         // Случайное сообщение — прощаемся с учётом времени и языка
         const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
-        const lastUserMsg = [...conv.messages].reverse().find(m => m.role === "user")?.content || '';
-        const lang = detectLanguage(lastUserMsg);
+        const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
+        let lang = 'английский';
+        if (/[а-яёА-ЯЁ]/.test(joinedU)) lang = 'русский';
+        else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|hej|tak|nie|dzien|jutro|godzina|prosze)\b/i.test(joinedU)) lang = 'польский';
         const greetings = {
           'русский': hour < 12 ? 'Доброго утра' : hour < 18 ? 'Приятного дня' : 'Приятного вечера',
           'польский': hour < 12 ? 'Miłego poranka' : hour < 18 ? 'Miłego dnia' : 'Miłego wieczoru',
