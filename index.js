@@ -60,7 +60,7 @@ if (process.env.ARTONELI_TOKEN) {
       username: "la.cosmetics",
       name: "la.cosmetics",
       accessToken: process.env.ARTONELI_TOKEN,
-      telegramChatId: null,
+      telegramChatId: "7027787839",
       description: `Название: BARBERSHOP BARBERSQUAD
 
 ПРАЙС-ЛИСТ УСЛУГ (показывай этот список клиенту когда он спрашивает услуги или цены, СОХРАНЯЯ форматирование, эмодзи и номера):
@@ -933,7 +933,7 @@ if (pendingTime && !conv.isRescheduling) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: TELEGRAM_CHAT_ID,
+      chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
       text: `❌ Отмена записи!\n\n👤 Имя: ${cancelName}\n🕐 Время: ${cancelTime}\n\nКлиент отменил запись.`
     })
   });
