@@ -54,11 +54,11 @@ function saveBusiness(igId, data) {
 // Предзагрузка artoneli.pl
 if (process.env.ARTONELI_TOKEN) {
   const businesses = loadBusinesses();
-  if (!businesses["17841476102212879"]) {
-    saveBusiness("17841476102212879", {
-      igId: "17841476102212879",
-      username: "artoneli.pl",
-      name: "Artoneli",
+  if (!businesses["17841426017477731"]) {
+    saveBusiness("17841426017477731", {
+      igId: "17841426017477731",
+      username: "la.cosmetics",
+      name: "la.cosmetics",
       accessToken: process.env.ARTONELI_TOKEN,
       telegramChatId: null,
       description: `Название: BARBERSHOP BARBERSQUAD
