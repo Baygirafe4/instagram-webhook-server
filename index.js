@@ -550,6 +550,11 @@ const TRANSLATIONS = {
     'польский': 'Świetnie, zapiszemy Cię jeszcze raz! 😊 Jaką usługę wybierasz?',
     'английский': 'Great, let\'s book you again! 😊 Which service would you like?'
   },
+  rescheduleAsk: {
+    'русский': 'Конечно, перенесём вашу запись! 😊 На какое время хотите перенести?',
+    'польский': 'Oczywiście, przełożymy Twoją wizytę! 😊 Na jaką godzinę chcesz przełożyć?',
+    'английский': 'Of course, we\'ll reschedule your appointment! 😊 What time would you like to move it to?'
+  },
   accidental: {
     'русский': 'Ничего страшного! {t}! 😊 Ждём вас на записи! 💈',
     'польский': 'Nic się nie stało! {t}! 😊 Czekamy na Ciebie! 💈',
@@ -663,6 +668,7 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
       const lowerText = text.toLowerCase();
       const isAccidental = /случайн|ошибся|ошиблась|не туда|wrong chat|pomyłka|przepraszam|nie to/i.test(lowerText);
       const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу|отказ/i.test(lowerText);
+      const wantsReschedule = /перенес|перенест|перенос|на другое|другое время|другой день|поменя|измени|перезап|przełoż|przenie|inny termin|inną godz|zmien|reschedule|change|move|different (time|day)/i.test(lowerText);
       const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|запиши|another|again|book again|new booking|znowu|jeszcze raz|umówić|zapisać/i.test(lowerText);
 
       if (isAccidental) {
@@ -679,27 +685,26 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
         };
         await sendInstagramMessage(senderId, t('accidental', conv, greetings[lang]), business.accessToken);
         return;
-      } else if (wantsCancel) {
-        conv.completed = false;
-        await persistConv(convKey);
-        // Продолжаем — ИИ обработает отмену через [ОТМЕНА_ЗАПИСИ]
-      } else if (wantsNewBooking) {
-        // Сохраняем старую запись чтобы потом показать барберу что это перезапись
+      } else if (wantsReschedule || wantsNewBooking) {
+        // Перенос или повторная запись — сохраняем старую запись, начинаем сбор нового времени
         const oldAptForRebook = db ? await db.collection("appointments").findOne(
           { senderId, businessId: business.igId, status: { $ne: "cancelled" } },
           { sort: { createdAt: -1 } }
         ) : null;
-        // Сбрасываем диалог и начинаем как в первый раз
-        const botGreeting = t('bookAgain', conv);
+        const botGreeting = wantsReschedule ? t('rescheduleAsk', conv) : t('bookAgain', conv);
         conv.messages = [{ role: "assistant", content: botGreeting }];
         conv.completed = false;
         conv.humanMode = false;
         conv.awaitingTimeConfirm = null;
-        conv.prevApt = oldAptForRebook ? { date: oldAptForRebook.date, time: oldAptForRebook.time } : null;
+        conv.prevApt = oldAptForRebook ? { date: oldAptForRebook.date, time: oldAptForRebook.time, telegramMessageId: oldAptForRebook.telegramMessageId } : null;
         conv.isRebooking = true;
         await persistConv(convKey);
         await sendInstagramMessage(senderId, botGreeting, business.accessToken);
         return;
+      } else if (wantsCancel) {
+        conv.completed = false;
+        await persistConv(convKey);
+        // Продолжаем — ИИ обработает отмену через [CANCEL]
       } else {
         // Непонятное сообщение — напоминаем что записан, но естественно
         const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
@@ -887,11 +892,12 @@ if (pendingTime && !conv.isRescheduling) {
   await deletePendingReschedule(senderId);
   await notifyDirector(`✏️ Клиент предложил своё время`, senderId, conv, business);
 } else if (conv.isRebooking && conv.prevApt) {
-  // Клиент перезаписался — показываем старую и новую запись
+  // Клиент перенёс/перезаписался — показываем старую и новую запись, отвечаем на старую заявку
   const prevInfo = `${conv.prevApt.date} в ${conv.prevApt.time}`;
+  const prevMsgId = conv.prevApt.telegramMessageId || conv.telegramMessageId || null;
   conv.isRebooking = false;
   conv.prevApt = null;
-  await notifyDirector(`🔄 Клиент перезаписался!\n\n❌ Старая запись: ${prevInfo} — отменена`, senderId, conv, business);
+  await notifyDirector(`🔄 Клиент перенёс запись!\n\n❌ Старая запись: ${prevInfo} — отменена`, senderId, conv, business, null, prevMsgId);
 } else {
   await notifyDirector("📅 Новая заявка на запись!", senderId, conv, business);
 }
@@ -930,15 +936,17 @@ if (pendingTime && !conv.isRescheduling) {
     }
   }
 
-  // Уведомляем барбера об отмене
+  // Уведомляем барбера об отмене (ответом на исходную заявку)
   const cancelName = cancelledApt?.name || "Клиент";
   const cancelTime = cancelledApt ? `${cancelledApt.date} в ${cancelledApt.time}` : "неизвестное время";
+  const cancelReplyId = cancelledApt?.telegramMessageId || conv.telegramMessageId || null;
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
-      text: `❌ Отмена записи!\n\n👤 Имя: ${cancelName}\n🕐 Время: ${cancelTime}\n\nКлиент отменил запись.`
+      text: `❌ Отмена записи!\n\n👤 Имя: ${cancelName}\n🕐 Время: ${cancelTime}\n\nКлиент отменил запись.`,
+      ...(cancelReplyId ? { reply_to_message_id: cancelReplyId } : {})
     })
   });
 
