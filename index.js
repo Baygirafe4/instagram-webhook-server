@@ -738,7 +738,25 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
   }
 
   if (conv.humanMode) {
-    await notifyDirector(`💬 Клиент пишет:\n"${text}"`, senderId, conv, business);
+    // Legacy-режим: ведём себя как ручной режим — пересылаем барберу с возможностью ответить reply
+    conv.messages.push({ role: "user", content: text });
+    if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
+    await persistConv(convKey);
+    const resHm = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
+        text: `💬 Клиент пишет (вы отвечаете сами):\n"${text}"\n\n↩️ Ответьте reply НА ЭТО сообщение — ваш текст уйдёт клиенту в Instagram.`,
+        reply_markup: {
+          inline_keyboard: [[{ text: "🤖 Вернуть бота", callback_data: `botback_${senderId}` }]]
+        }
+      })
+    });
+    const dataHm = await resHm.json();
+    if (dataHm.ok && dataHm.result?.message_id) {
+      await saveMessageLink(dataHm.result.message_id, senderId, business.igId);
+    }
     return;
   }
 
@@ -1059,8 +1077,8 @@ if (pendingTime && !conv.isRescheduling) {
 
   if (/\[HUMAN\]/i.test(aiReply) || aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
     const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
-    conv.humanMode = true;
-    conv.manualMode = true; // автоматически передаём диалог барберу
+    conv.humanMode = false;
+    conv.manualMode = true; // передаём диалог барберу (единый флаг ручного режима)
     await persistConv(convKey);
     if (cleanReply) await sendInstagramMessage(senderId, cleanReply, business.accessToken);
 
@@ -1327,6 +1345,7 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
       const convKeyB = `${business.igId}_${senderId}`;
       const convB = await getConversation(convKeyB);
       convB.manualMode = false;
+      convB.humanMode = false; // ВАЖНО: сбрасываем оба флага, иначе бот останется молчаливым
       await persistConv(convKeyB);
       await sendTg(`🤖 Бот снова отвечает этому клиенту.`);
     }
@@ -1414,10 +1433,23 @@ if (/^\/(вкл|on|start|включить)/i.test(text) && !body.message.from?.i
   const bizOn = Object.values(loadBusinesses()).find(b => (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId) || Object.values(loadBusinesses())[0];
   if (bizOn) {
     await setBotEnabled(bizOn.igId, true);
+    // Снимаем ручной режим со всех клиентов этого бизнеса, чтобы ничего не зависло
+    if (db) {
+      await db.collection("conversations").updateMany(
+        { key: { $regex: `^${bizOn.igId}_` } },
+        { $set: { manualMode: false, humanMode: false } }
+      );
+    }
+    for (const k of Object.keys(conversations)) {
+      if (k.startsWith(`${bizOn.igId}_`)) {
+        conversations[k].manualMode = false;
+        conversations[k].humanMode = false;
+      }
+    }
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: "🟢 Бот ВКЛЮЧЁН и снова отвечает клиентам автоматически." })
+      body: JSON.stringify({ chat_id: chatId, text: "🟢 Бот ВКЛЮЧЁН и снова отвечает всем клиентам автоматически." })
     });
   }
   return;
