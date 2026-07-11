@@ -155,9 +155,12 @@ async function findClientByMessageId(messageId, businessId) {
 
 // ─── Внутренний календарь ─────────────────────────────────────────────────────
 // ─── Слоты в MongoDB ──────────────────────────────────────────────────────────
-async function isSlotTaken(date, time, businessId) {
+async function isSlotTaken(date, time, businessId, excludeSenderId = null) {
   if (!db) return false;
-  const doc = await db.collection("appointments").findOne({ businessId, date, time, status: { $ne: "cancelled" } });
+  const query = { businessId, date, time, status: { $ne: "cancelled" } };
+  // При переносе не считаем занятой собственную запись клиента
+  if (excludeSenderId) query.senderId = { $ne: excludeSenderId };
+  const doc = await db.collection("appointments").findOne(query);
   return !!doc;
 }
 
@@ -215,11 +218,14 @@ async function persistConv(key) {
 }
 
 // ─── Системный промпт ─────────────────────────────────────────────────────────
-async function buildSystemPrompt(business, lang = 'польский') {
+async function buildSystemPrompt(business, lang = 'польский', excludeSenderId = null) {
   let bookedInfo = '';
   if (db) {
     const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
-const bookedApts = await db.collection('appointments').find({ businessId: business.igId, date: { $gte: todayIso }, status: { $ne: "cancelled" } }).toArray();
+const bookedQuery = { businessId: business.igId, date: { $gte: todayIso }, status: { $ne: "cancelled" } };
+// При переносе не показываем ИИ собственную запись клиента как занятую
+if (excludeSenderId) bookedQuery.senderId = { $ne: excludeSenderId };
+const bookedApts = await db.collection('appointments').find(bookedQuery).toArray();
 if (bookedApts.length > 0) {
   bookedInfo = '\nЗАНЯТЫЕ СЛОТЫ (никогда не предлагай это время на эту дату):\n' + 
     bookedApts.map(s => `- ${s.date} в ${s.time}`).join('\n');
@@ -278,6 +284,7 @@ ${business.description}
 16. ОТМЕНА: Если клиент отменяет запись — вежливо подтверди отмену без осуждения, поблагодари что предупредил, и добавь [CANCEL]. Не проси объяснять причину, не уговаривай остаться.
 17. ЧЕГО НЕ ДЕЛАЙ САМ: не придумывай и не обещай скидки, акции, бонусы. Не называй цен которых нет в прайс-листе. Не давай медицинских или косметических советов (про кожу, волосы, аллергии, средства). Не отвечай на личные вопросы о мастерах. Не переноси и не отменяй записи ДРУГИХ клиентов. Не гарантируй конкретного мастера если тебя об этом не просили подтвердить.
 18. ПЕРЕДАВАЙ ЧЕЛОВЕКУ (добавляй [HUMAN]) когда: клиент просит скидку или индивидуальные условия; жалуется или недоволен; задаёт сложный вопрос об услуге на который нет ответа в прайсе; конфликтная или необычная ситуация; клиент прямо просит позвать человека/администратора; вопрос про здоровье, аллергию, противопоказания.
+19. КОНТЕКСТ ЗАПИСИ: Если в диалоге есть сообщение начинающееся с "[КОНТЕКСТ ДЛЯ ТЕБЯ" — это служебная информация о существующей записи клиента. НИКОГДА не показывай её клиенту и не упоминай. Используй эти данные (имя, услуга, дата, время, телефон) как УЖЕ ИЗВЕСТНЫЕ — не переспрашивай их. Спрашивай только то что клиент хочет изменить. Когда получишь изменение — сразу покажи ПОЛНОЕ резюме заявки (со всеми данными из контекста плюс изменённое) и поставь [READY].
 `;
 }
 
@@ -555,6 +562,11 @@ const TRANSLATIONS = {
     'польский': 'Oczywiście, przełożymy Twoją wizytę! 😊 Na jaką godzinę chcesz przełożyć?',
     'английский': 'Of course, we\'ll reschedule your appointment! 😊 What time would you like to move it to?'
   },
+  changeServiceAsk: {
+    'русский': 'Конечно, поменяем услугу! 😊 Какую услугу хотите вместо текущей?',
+    'польский': 'Oczywiście, zmienimy usługę! 😊 Jaką usługę chcesz zamiast obecnej?',
+    'английский': 'Of course, we\'ll change the service! 😊 Which service would you like instead?'
+  },
   accidental: {
     'русский': 'Ничего страшного! {t}! 😊 Ждём вас на записи! 💈',
     'польский': 'Nic się nie stało! {t}! 😊 Czekamy na Ciebie! 💈',
@@ -666,12 +678,26 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
     } else {
       // Запись ещё впереди — разбираем что написал клиент
       const lowerText = text.toLowerCase();
-      const isAccidental = /случайн|ошибся|ошиблась|не туда|wrong chat|pomyłka|przepraszam|nie to/i.test(lowerText);
-      const wantsCancel = /отмен|cancel|anuluj|не приду|не смогу|отказ/i.test(lowerText);
-      const wantsReschedule = /перенес|перенест|перенос|на другое|другое время|другой день|поменя|измени|перезап|przełoż|przenie|inny termin|inną godz|zmien|reschedule|change|move|different (time|day)/i.test(lowerText);
-      const wantsNewBooking = /снова|ещё раз|еще раз|записаться|хочу запис|запиши|another|again|book again|new booking|znowu|jeszcze raz|umówić|zapisać/i.test(lowerText);
 
-      if (isAccidental) {
+      // Случайное сообщение / ошибка (узко — проверяется последним, чтобы не перехватывать реальные намерения)
+      const isAccidental = /случайн|ошибс(я|ь) (чат|адрес)|не туда|не тому|промахнул|написал не|забудь|забей|проигнор|не важно|неважно|wrong chat|wrong person|my bad|nevermind|never mind|ignore (that|this)|oops|pomyłka|nie to|pomylił|nieważne|zignoruj/i.test(lowerText);
+
+      // Отмена записи
+      const wantsCancel = /отмен|отменя|аннул|не приду|не прийду|не смогу|не получ|не буду|отказ|снять запис|снимите запис|убрать запис|удалить запис|убери запис|удали запис|расторг|не актуальн|передумал прих|передумала прих|cancel|cancell|anuluj|anulow|odwoł|rezygn|nie przyjd|nie dam rady|nie mogę przyj|call off|drop (my |the )?(booking|appointment)|remove (my |the )?(booking|appointment)|delete (my |the )?(booking|appointment)|not coming|can'?t (come|make it)|won'?t (come|make it)/i.test(lowerText);
+
+      // Смена услуги
+      const wantsChangeService = /(поменя|помен|смени|сменит|измени|изменит|заменит|замени|другую|другая|другой вид|вместо|переигр|перевыбр|махн)[^\n]{0,25}(услуг|стрижк|процедур|service|usług|zabieg)|(услуг|service|usług)[^\n]{0,25}(поменя|смени|измени|заменит|другую|change|zmien|inną)|не ту услуг|не та услуг|хочу другое|хочу другую|выбрал не то|выбрала не то|ошибся с услуг|change (the |my )?service|different service|another service|switch service|wrong service|zmien(ić|ic)? (usług|zabieg)|inn(ą|a) usług/i.test(lowerText);
+
+      // Перенос записи на другое время (не путать со сменой услуги)
+      const wantsReschedule = !wantsChangeService && /перенес|перенест|перенос|перенеси|передвин|сдвин|сдвиг|перекин|перебронир|перезап|переназнач|на другое время|другое время|другой день|другую дату|другое число|поменять время|поменять дату|сменить время|сменить дату|изменить время|изменить дату|изменить запись|поменять запись|попозже|пораньше|позже можно|раньше можно|не могу в это время|неудобное время|не подходит время|przełoż|przenie|przesun|inny termin|inn(ą|a) godzin|inny dzień|zmien(ić|ic)? (termin|godzin|dat)|reschedul|resched|move (my |the )?(booking|appointment|time)|move it|push (it )?(back|forward)|change (my |the )?(time|date|appointment|booking)|different (time|day|date)|another (time|day|date)|earlier|later( time)?|switch (my |the )?(time|appointment)/i.test(lowerText);
+
+      // Новая (дополнительная) запись
+      const wantsNewBooking = /снова|ещё раз|еще раз|опять|заново|новая запис|новую запис|записаться( снова| ещё| еще)?|хочу запис|запиши( меня)?|ещё одну|еще одну|дополнительн|another (appointment|booking|slot)|book again|again|new (appointment|booking)|one more|additional|znowu|jeszcze raz|ponownie|kolejn(ą|a)|now(ą|a) wizyt|umówić się jeszcze|zapisać się jeszcze/i.test(lowerText);
+
+      // Явные намерения имеют приоритет над "случайным сообщением"
+      const hasRealIntent = wantsCancel || wantsChangeService || wantsReschedule || wantsNewBooking;
+
+      if (isAccidental && !hasRealIntent) {
         // Случайное сообщение — прощаемся с учётом времени и языка
         const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
         const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
@@ -685,14 +711,56 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
         };
         await sendInstagramMessage(senderId, t('accidental', conv, greetings[lang]), business.accessToken);
         return;
-      } else if (wantsReschedule || wantsNewBooking) {
-        // Перенос или повторная запись — сохраняем старую запись, начинаем сбор нового времени
+      } else if (wantsReschedule || wantsChangeService || wantsNewBooking) {
+        // Перенос / смена услуги / повторная запись
         const oldAptForRebook = db ? await db.collection("appointments").findOne(
           { senderId, businessId: business.igId, status: { $ne: "cancelled" } },
           { sort: { createdAt: -1 } }
         ) : null;
-        const botGreeting = wantsReschedule ? t('rescheduleAsk', conv) : t('bookAgain', conv);
-        conv.messages = [{ role: "assistant", content: botGreeting }];
+
+        // Телефон клиента из истории (чтобы не спрашивать заново)
+        const phoneFromHistory = conv.messages
+          .filter(m => m.role === "user")
+          .map(m => m.content)
+          .join(" ")
+          .match(/\+?\d[\d\s\-]{8,}/);
+
+        if (wantsNewBooking && !wantsReschedule && !wantsChangeService) {
+          // Совсем новая запись — начинаем с нуля
+          const botGreeting = t('bookAgain', conv);
+          conv.messages = [{ role: "assistant", content: botGreeting }];
+          conv.completed = false;
+          conv.humanMode = false;
+          conv.awaitingTimeConfirm = null;
+          conv.prevApt = null;
+          conv.isRebooking = false;
+          await persistConv(convKey);
+          await sendInstagramMessage(senderId, botGreeting, business.accessToken);
+          return;
+        }
+
+        // Перенос или смена услуги — СОХРАНЯЕМ известные данные клиента
+        const knownName = oldAptForRebook?.name && oldAptForRebook.name !== "не указано" ? oldAptForRebook.name : null;
+        const knownService = oldAptForRebook?.service && oldAptForRebook.service !== "не указана" ? oldAptForRebook.service : null;
+        const knownPhone = phoneFromHistory ? phoneFromHistory[0].trim() : null;
+        const knownDate = oldAptForRebook?.date || null;
+        const knownTime = oldAptForRebook?.time || null;
+
+        // Контекст для ИИ: что уже известно и что нужно изменить
+        let contextNote = `[КОНТЕКСТ ДЛЯ ТЕБЯ, не показывай клиенту] У клиента УЖЕ ЕСТЬ запись:\n`;
+        if (knownName) contextNote += `- Имя: ${knownName}\n`;
+        if (knownService) contextNote += `- Услуга: ${knownService}\n`;
+        if (knownDate && knownTime) contextNote += `- Текущая дата и время: ${knownDate} в ${knownTime}\n`;
+        if (knownPhone) contextNote += `- Телефон: ${knownPhone}\n`;
+        contextNote += wantsChangeService
+          ? `\nКлиент хочет ПОМЕНЯТЬ УСЛУГУ. НЕ спрашивай имя, дату, время и телефон — они уже известны выше, используй их. Спроси ТОЛЬКО новую услугу (покажи прайс-лист). Когда клиент выберет услугу — сразу покажи полное резюме заявки со всеми известными данными и поставь [READY].`
+          : `\nКлиент хочет ПЕРЕНЕСТИ запись на другое время. НЕ спрашивай имя, услугу и телефон — они уже известны выше, используй их. Спроси ТОЛЬКО новое время (и дату если клиент не назвал). Когда клиент назовёт новое время — сразу покажи полное резюме заявки со всеми известными данными и поставь [READY].`;
+
+        const botGreeting = wantsChangeService ? t('changeServiceAsk', conv) : t('rescheduleAsk', conv);
+        conv.messages = [
+          { role: "user", content: contextNote },
+          { role: "assistant", content: botGreeting }
+        ];
         conv.completed = false;
         conv.humanMode = false;
         conv.awaitingTimeConfirm = null;
@@ -764,7 +832,7 @@ if (userTime && !conv.awaitingTimeConfirm) {
   }
 
   if (checkDate) {
-    const taken = await isSlotTaken(checkDate, userTime, business.igId);
+    const taken = await isSlotTaken(checkDate, userTime, business.igId, senderId);
     if (taken) {
       await sendInstagramMessage(senderId, t('slotTaken', conv, `${userTime} ${checkDate}`), business.accessToken);
       return;
@@ -776,7 +844,7 @@ if (userTime && !conv.awaitingTimeConfirm) {
   if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
 
   const lang = detectLanguage(conv.messages[0]?.content || text);
-const aiReply = await askClaude(conv.messages, business, lang);
+const aiReply = await askClaude(conv.messages, business, lang, senderId);
 
   if (!aiReply) {
     await sendInstagramMessage(senderId, t('error', conv), business.accessToken);
@@ -812,7 +880,7 @@ const aiReply = await askClaude(conv.messages, business, lang);
     const normTime = parseTimeFromText(lastBotMsg.content);
     const isoDate = extractIsoDate(conv.messages);
     if (normTime && isoDate) {
-      const taken = await isSlotTaken(isoDate, normTime, business.igId);
+      const taken = await isSlotTaken(isoDate, normTime, business.igId, senderId);
       if (taken) {
         conv.completed = false;
         await persistConv(convKey);
@@ -962,7 +1030,7 @@ if (pendingTime && !conv.isRescheduling) {
 }
 
 // ─── Claude API ───────────────────────────────────────────────────────────────
-async function askClaude(messages, business, lang = 'польский') {
+async function askClaude(messages, business, lang = 'польский', senderIdForBusy = null) {
   if (!ANTHROPIC_API_KEY) return null;
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -975,7 +1043,7 @@ async function askClaude(messages, business, lang = 'польский') {
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 500,
-        system: await buildSystemPrompt(business, lang),
+        system: await buildSystemPrompt(business, lang, senderIdForBusy),
         messages
       })
     });
