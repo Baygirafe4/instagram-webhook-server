@@ -138,6 +138,28 @@ async function deletePendingReschedule(senderId) {
   await db.collection("pending").deleteOne({ senderId });
 }
 
+// ─── Включение/выключение бота (А: для всего бизнеса) ─────────────────────────
+const botEnabledCache = {};
+
+async function isBotEnabled(businessId) {
+  if (!db) return true;
+  if (botEnabledCache[businessId] !== undefined) return botEnabledCache[businessId];
+  const doc = await db.collection("settings").findOne({ key: `botEnabled_${businessId}` });
+  const enabled = doc ? doc.value !== false : true; // по умолчанию включён
+  botEnabledCache[businessId] = enabled;
+  return enabled;
+}
+
+async function setBotEnabled(businessId, enabled) {
+  botEnabledCache[businessId] = enabled;
+  if (!db) return;
+  await db.collection("settings").updateOne(
+    { key: `botEnabled_${businessId}` },
+    { $set: { key: `botEnabled_${businessId}`, value: enabled, updatedAt: new Date() } },
+    { upsert: true }
+  );
+}
+
 // Находит senderId клиента по id сообщения-заявки в Telegram (когда барбер отвечает reply на заявку)
 async function findClientByMessageId(messageId, businessId) {
   if (!db || !messageId) return null;
@@ -186,6 +208,7 @@ async function getConversation(key) {
         conversations[key] = {
           messages: doc.messages || [],
           humanMode: doc.humanMode || false,
+          manualMode: doc.manualMode || false,
           awaitingTimeConfirm: doc.awaitingTimeConfirm || null,
           completed: doc.completed || false,
           telegramMessageId: doc.telegramMessageId || null
@@ -193,7 +216,7 @@ async function getConversation(key) {
       }
     }
     if (!conversations[key]) {
-      conversations[key] = { messages: [], humanMode: false, awaitingTimeConfirm: null, completed: false, telegramMessageId: null };
+      conversations[key] = { messages: [], humanMode: false, manualMode: false, awaitingTimeConfirm: null, completed: false, telegramMessageId: null };
     }
   }
   return conversations[key];
@@ -208,6 +231,7 @@ async function persistConv(key) {
         key,
         messages: c.messages,
         humanMode: !!c.humanMode,
+        manualMode: !!c.manualMode,
         awaitingTimeConfirm: c.awaitingTimeConfirm || null,
         completed: !!c.completed,
         telegramMessageId: c.telegramMessageId || null,
@@ -597,6 +621,37 @@ function t(key, conv, value = '') {
 async function handleMessage(senderId, text, business) {
   const convKey = `${business.igId}_${senderId}`;
   const conv = await getConversation(convKey);
+
+  // А: бот выключен для всего бизнеса — пересылаем сообщение барберу, сами не отвечаем
+  const enabled = await isBotEnabled(business.igId);
+  if (!enabled) {
+    conv.messages.push({ role: "user", content: text });
+    if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
+    await persistConv(convKey);
+    await notifyDirector(`💬 Сообщение от клиента (бот выключен):\n"${text}"`, senderId, conv, business);
+    return;
+  }
+
+  // Б: бот отключён для этого конкретного клиента — барбер отвечает сам
+  if (conv.manualMode) {
+    conv.messages.push({ role: "user", content: text });
+    if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
+    await persistConv(convKey);
+    const replyId = conv.telegramMessageId || null;
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
+        text: `💬 Клиент пишет (вы отвечаете сами):\n"${text}"\n\n↩️ Ответьте reply на это сообщение, чтобы отправить ему ответ.\n🤖 Чтобы вернуть бота — нажмите кнопку ниже.`,
+        ...(replyId ? { reply_to_message_id: replyId } : {}),
+        reply_markup: {
+          inline_keyboard: [[{ text: "🤖 Вернуть бота", callback_data: `botback_${senderId}` }]]
+        }
+      })
+    });
+    return;
+  }
 
   // Проверяем ждёт ли подтверждения времени
   if (conv.awaitingTimeConfirm) {
@@ -1107,6 +1162,9 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
       ],
       [
         { text: "✏️ Своё время", callback_data: `reschedule_${senderId}` },
+        { text: "💬 Отвечу сам", callback_data: `manual_${senderId}` }
+      ],
+      [
         { text: "📖 Открыть Booksy", url: "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa" }
       ]
     ]
@@ -1187,6 +1245,40 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
   await persistConv(convKey);
 }
 
+    // Б: барбер берёт диалог на себя для конкретного клиента
+    if (data.startsWith("manual_")) {
+      const senderId = data.replace("manual_", "");
+      await answerCallback();
+      const convKeyM = `${business.igId}_${senderId}`;
+      const convM = await getConversation(convKeyM);
+      convM.manualMode = true;
+      await persistConv(convKeyM);
+      const replyIdM = convM.telegramMessageId || null;
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `💬 Бот отключён для этого клиента. Теперь вы отвечаете сами.\n\n↩️ Отвечайте reply на сообщения клиента — они уйдут ему в Instagram.`,
+          ...(replyIdM ? { reply_to_message_id: replyIdM } : {}),
+          reply_markup: {
+            inline_keyboard: [[{ text: "🤖 Вернуть бота", callback_data: `botback_${senderId}` }]]
+          }
+        })
+      });
+    }
+
+    // Б: барбер возвращает бота этому клиенту
+    if (data.startsWith("botback_")) {
+      const senderId = data.replace("botback_", "");
+      await answerCallback();
+      const convKeyB = `${business.igId}_${senderId}`;
+      const convB = await getConversation(convKeyB);
+      convB.manualMode = false;
+      await persistConv(convKeyB);
+      await sendTg(`🤖 Бот снова отвечает этому клиенту.`);
+    }
+
     if (data.startsWith("slots_")) {
       const senderId = data.replace("slots_", "");
       await answerCallback();
@@ -1252,6 +1344,46 @@ await sendTg(`✅ Время ${time} предложено клиенту. Ждё
     // Команда /меню
 console.log(`TG message: chatId=${chatId}, text=${text}`);
 
+// ─── А: команды включения/выключения бота ───────────────────────────────────
+if (/^\/(выкл|off|stop|выключить)/i.test(text) && !body.message.from?.is_bot) {
+  const bizOff = Object.values(loadBusinesses()).find(b => (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId) || Object.values(loadBusinesses())[0];
+  if (bizOff) {
+    await setBotEnabled(bizOff.igId, false);
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: "🔴 Бот ВЫКЛЮЧЕН.\n\nСообщения клиентов будут приходить вам сюда — отвечайте им reply.\n\nЧтобы включить обратно: /вкл" })
+    });
+  }
+  return;
+}
+
+if (/^\/(вкл|on|start|включить)/i.test(text) && !body.message.from?.is_bot) {
+  const bizOn = Object.values(loadBusinesses()).find(b => (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId) || Object.values(loadBusinesses())[0];
+  if (bizOn) {
+    await setBotEnabled(bizOn.igId, true);
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: "🟢 Бот ВКЛЮЧЁН и снова отвечает клиентам автоматически." })
+    });
+  }
+  return;
+}
+
+if (/^\/(статус|status)/i.test(text) && !body.message.from?.is_bot) {
+  const bizSt = Object.values(loadBusinesses()).find(b => (b.telegramChatId || TELEGRAM_CHAT_ID) == chatId) || Object.values(loadBusinesses())[0];
+  if (bizSt) {
+    const on = await isBotEnabled(bizSt.igId);
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: on ? "🟢 Бот включён и отвечает клиентам." : "🔴 Бот выключен. Клиентам вы отвечаете сами.\n\nВключить: /вкл" })
+    });
+  }
+  return;
+}
+
 // Команда сброса для тестирования: /сброс или /reset — чистит все данные
 if ((text.toLowerCase().startsWith("/сброс") || text.toLowerCase().startsWith("/reset")) && !body.message.from?.is_bot) {
   if (db) {
@@ -1261,10 +1393,11 @@ if ((text.toLowerCase().startsWith("/сброс") || text.toLowerCase().startsWi
     await db.collection("pending").deleteMany({});
   }
   for (const k of Object.keys(conversations)) delete conversations[k];
+  for (const k of Object.keys(botEnabledCache)) delete botEnabledCache[k];
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: "🧹 Всё очищено! Все записи, слоты и диалоги удалены. Можно тестировать с чистого листа." })
+    body: JSON.stringify({ chat_id: chatId, text: "🧹 Всё очищено! Все записи, слоты и диалоги удалены.\n\nКоманды:\n/вкл — включить бота\n/выкл — выключить бота\n/статус — проверить состояние\nМеню [число] — расписание на день" })
   });
   return;
 }
@@ -1335,18 +1468,34 @@ const appointments = db ? await db.collection("appointments").find({
 
     if (customSenderId && !text.toLowerCase().startsWith("меню") && !text.startsWith("/")) {
       const senderId = customSenderId;
-      delete waitingForCustomTime[chatId];
-
       const business = businessReply;
-
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: `✅ Время "${text}" отправлено клиенту!` })
-      });
-      await savePendingReschedule(senderId, text);
       const convCustom = await getConversation(`${business.igId}_${senderId}`);
-      await sendInstagramMessage(senderId, t('proposeOtherTime', convCustom, text), business.accessToken);
+
+      const botOn = await isBotEnabled(business.igId);
+      const isManual = convCustom.manualMode;
+
+      if (!botOn || isManual) {
+        // Бот выключен или ручной режим — отправляем ответ барбера клиенту КАК ЕСТЬ
+        await sendInstagramMessage(senderId, text, business.accessToken);
+        convCustom.messages.push({ role: "assistant", content: text });
+        if (convCustom.messages.length > 20) convCustom.messages = convCustom.messages.slice(-20);
+        await persistConv(`${business.igId}_${senderId}`);
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: `✅ Отправлено клиенту.` })
+        });
+      } else {
+        // Обычный режим — барбер предлагает время
+        delete waitingForCustomTime[chatId];
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: `✅ Время "${text}" отправлено клиенту!` })
+        });
+        await savePendingReschedule(senderId, text);
+        await sendInstagramMessage(senderId, t('proposeOtherTime', convCustom, text), business.accessToken);
+      }
     }
   }
 
