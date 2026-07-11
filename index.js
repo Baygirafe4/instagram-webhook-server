@@ -160,15 +160,27 @@ async function setBotEnabled(businessId, enabled) {
   );
 }
 
+// Связь telegram-сообщение → клиент (чтобы reply на любое сообщение нашёл клиента)
+async function saveMessageLink(messageId, senderId, businessId) {
+  if (!db || !messageId) return;
+  await db.collection("msglinks").updateOne(
+    { messageId },
+    { $set: { messageId, senderId, businessId, createdAt: new Date() } },
+    { upsert: true }
+  );
+}
+
 // Находит senderId клиента по id сообщения-заявки в Telegram (когда барбер отвечает reply на заявку)
 async function findClientByMessageId(messageId, businessId) {
   if (!db || !messageId) return null;
-  // Ищем сначала в pending (свежие заявки), потом в conversations
+  // Сначала прямая связь (любое пересланное сообщение)
+  const link = await db.collection("msglinks").findOne({ messageId });
+  if (link?.senderId) return link.senderId;
+  // Потом pending (свежие заявки)
   const pend = await db.collection("pending").findOne({ telegramMessageId: messageId });
   if (pend?.senderId) return pend.senderId;
   const conv = await db.collection("conversations").findOne({ telegramMessageId: messageId });
   if (conv?.key) {
-    // key имеет вид "businessId_senderId" — вытаскиваем senderId
     const prefix = `${businessId}_`;
     if (conv.key.startsWith(prefix)) return conv.key.slice(prefix.length);
   }
@@ -628,7 +640,18 @@ async function handleMessage(senderId, text, business) {
     conv.messages.push({ role: "user", content: text });
     if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
     await persistConv(convKey);
-    await notifyDirector(`💬 Сообщение от клиента (бот выключен):\n"${text}"`, senderId, conv, business);
+    const resOff = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
+        text: `💬 Сообщение от клиента (бот выключен):\n"${text}"\n\n↩️ Ответьте reply НА ЭТО сообщение — ваш текст уйдёт клиенту в Instagram.`
+      })
+    });
+    const dataOff = await resOff.json();
+    if (dataOff.ok && dataOff.result?.message_id) {
+      await saveMessageLink(dataOff.result.message_id, senderId, business.igId);
+    }
     return;
   }
 
@@ -637,19 +660,22 @@ async function handleMessage(senderId, text, business) {
     conv.messages.push({ role: "user", content: text });
     if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
     await persistConv(convKey);
-    const replyId = conv.telegramMessageId || null;
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
-        text: `💬 Клиент пишет (вы отвечаете сами):\n"${text}"\n\n↩️ Ответьте reply на это сообщение, чтобы отправить ему ответ.\n🤖 Чтобы вернуть бота — нажмите кнопку ниже.`,
-        ...(replyId ? { reply_to_message_id: replyId } : {}),
+        text: `💬 Клиент пишет (вы отвечаете сами):\n"${text}"\n\n↩️ Ответьте reply НА ЭТО сообщение — ваш текст уйдёт клиенту в Instagram.`,
         reply_markup: {
           inline_keyboard: [[{ text: "🤖 Вернуть бота", callback_data: `botback_${senderId}` }]]
         }
       })
     });
+    // Сохраняем id этого сообщения чтобы reply на него нашёл клиента
+    const data = await res.json();
+    if (data.ok && data.result?.message_id) {
+      await saveMessageLink(data.result.message_id, senderId, business.igId);
+    }
     return;
   }
 
@@ -1034,9 +1060,34 @@ if (pendingTime && !conv.isRescheduling) {
   if (/\[HUMAN\]/i.test(aiReply) || aiReply.includes("[НУЖЕН_ЧЕЛОВЕК]")) {
     const cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
     conv.humanMode = true;
+    conv.manualMode = true; // автоматически передаём диалог барберу
     await persistConv(convKey);
-    await sendInstagramMessage(senderId, cleanReply, business.accessToken);
-    await notifyDirector("🙋 Клиент хочет поговорить с человеком!", senderId, conv, business);
+    if (cleanReply) await sendInstagramMessage(senderId, cleanReply, business.accessToken);
+
+    // Определяем причину, чтобы барбер сразу понял что случилось
+    const lastUser = conv.messages.filter(m => m.role === "user").slice(-1)[0]?.content || "";
+    const lu = lastUser.toLowerCase();
+    let reason = "🙋 Клиент просит человека";
+    if (/скидк|дешевл|подеш|дорого|snizh|discount|zniżk|taniej/i.test(lu)) reason = "💰 Клиент спрашивает про скидку";
+    else if (/жалоб|недовол|ужасн|плохо|отврат|верните деньги|хамств|испортил|complaint|awful|terrible|refund|skarg|okropn/i.test(lu)) reason = "⚠️ Клиент недоволен / жалуется";
+    else if (/аллерг|кожа|болит|раздражен|противопоказ|беремен|allerg|skin|pregnan|uczulen/i.test(lu)) reason = "🏥 Вопрос про здоровье / аллергию";
+    else if (/дурак|идиот|тупой|сука|блять|нахуй|говно|мраз|fuck|shit|idiot|stupid|kurwa|chuj|debil/i.test(lu)) reason = "🚨 Клиент грубит / агрессия";
+
+    const resH = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: business.telegramChatId || TELEGRAM_CHAT_ID,
+        text: `${reason} — бот передал диалог вам.\n\n💬 Клиент пишет:\n"${lastUser}"\n\n↩️ Ответьте reply НА ЭТО сообщение — ваш текст уйдёт клиенту в Instagram.`,
+        reply_markup: {
+          inline_keyboard: [[{ text: "🤖 Вернуть бота", callback_data: `botback_${senderId}` }]]
+        }
+      })
+    });
+    const dataH = await resH.json();
+    if (dataH.ok && dataH.result?.message_id) {
+      await saveMessageLink(dataH.result.message_id, senderId, business.igId);
+    }
     return;
   }
 
@@ -1187,6 +1238,7 @@ const message = `${title}\n\n👤 Имя: ${name}\n✂️ Услуга: ${servic
       { $set: { telegramMessageId: data.result.message_id } },
       { upsert: true }
     );
+    await saveMessageLink(data.result.message_id, senderId, business.igId);
   }
 }
     console.log("Telegram:", data.ok ? "✅" : "❌ " + data.description);
@@ -1391,6 +1443,8 @@ if ((text.toLowerCase().startsWith("/сброс") || text.toLowerCase().startsWi
     await db.collection("slots").deleteMany({});
     await db.collection("conversations").deleteMany({});
     await db.collection("pending").deleteMany({});
+    await db.collection("msglinks").deleteMany({});
+    await db.collection("settings").deleteMany({});
   }
   for (const k of Object.keys(conversations)) delete conversations[k];
   for (const k of Object.keys(botEnabledCache)) delete botEnabledCache[k];
