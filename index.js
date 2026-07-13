@@ -628,21 +628,25 @@ const TRANSLATIONS = {
   }
 };
 
-// Возвращает фразу на языке клиента (по всем его сообщениям, а не только последнему)
+// Возвращает только НАСТОЯЩИЕ сообщения клиента (без служебных контекстов на русском)
+function realUserMessages(conv) {
+  return conv.messages
+    .filter(m => m.role === "user" && typeof m.content === "string")
+    .map(m => m.content)
+    .filter(c => !c.startsWith("[КОНТЕКСТ ДЛЯ ТЕБЯ"));
+}
+
+// Определяет язык клиента по его настоящим сообщениям
+function clientLang(conv) {
+  const joined = realUserMessages(conv).join(' ');
+  if (/[а-яёА-ЯЁ]/.test(joined)) return 'русский';
+  if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joined) || /\b(czesc|cześć|hej|siema|chce|chcę|sie|się|tak|nie|dzien|dzień|dobry|witaj|umowic|umówić|strzyzenie|strzyżenie|fryzjer|zapisac|zapisać|prosze|proszę|godzina|jutro|dzisiaj)\b/i.test(joined)) return 'польский';
+  return 'английский';
+}
+
+// Возвращает фразу на языке клиента
 function t(key, conv, value = '') {
-  const userMsgs = conv.messages.filter(m => m.role === "user").map(m => m.content);
-  // Определяем язык по каждому сообщению; берём преобладающий, но русский/польский имеют приоритет над английским
-  let lang = 'английский';
-  const joined = userMsgs.join(' ');
-  if (/[а-яёА-ЯЁ]/.test(joined)) {
-    lang = 'русский';
-  } else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joined) || /\b(czesc|hej|siema|chce|sie|tak|nie|dzien|dobry|witaj|umowic|strzyzenie|fryzjer|chcialbym|chcialabym|zapisac|prosze|godzina|jutro)\b/i.test(joined)) {
-    lang = 'польский';
-  } else {
-    // Если ни кириллицы ни польского — берём язык последнего осмысленного сообщения
-    const lastMeaningful = [...userMsgs].reverse().find(m => m.trim().length > 2 && !/^\+?[\d\s\-:]+$/.test(m.trim())) || joined;
-    lang = detectLanguage(lastMeaningful);
-  }
+  const lang = clientLang(conv);
   const phrase = (TRANSLATIONS[key] && TRANSLATIONS[key][lang]) || (TRANSLATIONS[key] && TRANSLATIONS[key]['русский']) || '';
   return phrase.replace('{t}', value);
 }
@@ -817,10 +821,7 @@ await notifyDirector(`✏️ Клиент подтвердил новое вре
       if (isAccidental && !hasRealIntent) {
         // Случайное сообщение — прощаемся с учётом времени и языка
         const hour = parseInt(new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Warsaw', hour: 'numeric', hour12: false }));
-        const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
-        let lang = 'английский';
-        if (/[а-яёА-ЯЁ]/.test(joinedU)) lang = 'русский';
-        else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|hej|tak|nie|dzien|jutro|godzina|prosze)\b/i.test(joinedU)) lang = 'польский';
+        const lang = clientLang(conv);
         const greetings = {
           'русский': hour < 12 ? 'Доброго утра' : hour < 18 ? 'Приятного дня' : 'Приятного вечера',
           'польский': hour < 12 ? 'Miłego poranka' : hour < 18 ? 'Miłego dnia' : 'Miłego wieczoru',
@@ -988,7 +989,7 @@ if (userTime && !conv.awaitingTimeConfirm) {
   conv.messages.push({ role: "user", content: text });
   if (conv.messages.length > 20) conv.messages = conv.messages.slice(-20);
 
-  const lang = detectLanguage(conv.messages[0]?.content || text);
+  const lang = clientLang(conv);
 const aiReply = await askClaude(conv.messages, business, lang, senderId);
 
   if (!aiReply) {
@@ -1007,12 +1008,8 @@ const aiReply = await askClaude(conv.messages, business, lang, senderId);
   const nameVal = nameCheck ? nameCheck[1].trim() : "";
   const namePlaceholder = /не указан|nie poda|not provided|—|отсутству|brak|\(.*\)/i.test(nameVal) || nameVal.length < 2;
   if (namePlaceholder) {
-    // Убираем метку и резюме, просим только имя на языке клиента
-    const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
-    let askLang = 'английский';
-    if (/[а-яёА-ЯЁ]/.test(joinedU)) askLang = 'русский';
-    else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|tak|nie|jutro|godzina)\b/i.test(joinedU)) askLang = 'польский';
-    const askName = { 'русский': 'Как вас зовут? 😊', 'польский': 'Jak masz na imię? 😊', 'английский': "What's your name? 😊" }[askLang];
+    // Просим имя на языке клиента
+    const askName = { 'русский': 'Как вас зовут? 😊', 'польский': 'Jak masz na imię? 😊', 'английский': "What's your name? 😊" }[clientLang(conv)];
     await sendInstagramMessage(senderId, askName, business.accessToken);
     return;
   }
@@ -1074,7 +1071,7 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
 
   // Отправляем клиенту
   let cleanReply = aiReply.replace(/\[.*?\]/g, "").replace(/\*+/g, "").trim();
-  // Если ИИ забыл добавить ссылку на запись — добавляем её сами
+  // Если ИИ забыл добавить ссылку на запись — добавляем её сами на языке клиента
   const bookingLink = "https://booksy.com/pl-pl/226901_barbershop-barbersquad_barber-shop_3_warszawa";
   if (!cleanReply.includes("booksy.com")) {
     const linkLabels = {
@@ -1082,11 +1079,7 @@ const serviceMatch = aiReply.match(/(?:Услуга|Usługa|Service)[:\s]+([^\n]
       'польский': '\n\n📅 Możesz też zarezerwować tutaj: ',
       'английский': '\n\n📅 You can also book here: '
     };
-    const joinedU = conv.messages.filter(m => m.role === "user").map(m => m.content).join(' ');
-    let linkLang = 'английский';
-    if (/[а-яёА-ЯЁ]/.test(joinedU)) linkLang = 'русский';
-    else if (/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(joinedU) || /\b(czesc|tak|nie|jutro|godzina)\b/i.test(joinedU)) linkLang = 'польский';
-    cleanReply += linkLabels[linkLang] + bookingLink;
+    cleanReply += linkLabels[clientLang(conv)] + bookingLink;
   }
   await sendInstagramMessage(senderId, cleanReply, business.accessToken);
 
